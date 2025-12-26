@@ -167,8 +167,6 @@ interface ArrayFieldComponent<TItemFields extends Form.FieldsRecord> extends
 // Internal Types
 // ================================
 
-type ValidationAtomRegistry = Map<string, Atom.AtomResultFn<unknown, void, ParseResult.ParseError>>
-
 interface FieldAtoms {
   readonly valueAtom: Atom.Writable<unknown, unknown>
   readonly initialValueAtom: Atom.Atom<unknown>
@@ -176,7 +174,53 @@ interface FieldAtoms {
   readonly crossFieldErrorAtom: Atom.Atom<Option.Option<string>>
 }
 
-type FieldAtomRegistry = Map<string, FieldAtoms>
+// ================================
+// Weak Registry (auto-cleanup via FinalizationRegistry)
+// ================================
+
+interface WeakRegistry<V extends object> {
+  readonly get: (key: string) => V | undefined
+  readonly set: (key: string, value: V) => void
+  readonly delete: (key: string) => boolean
+  readonly clear: () => void
+  readonly values: () => IterableIterator<V>
+}
+
+const createWeakRegistry = <V extends object>(): WeakRegistry<V> => {
+  if (typeof WeakRef === "undefined" || typeof FinalizationRegistry === "undefined") {
+    const map = new Map<string, V>()
+    return {
+      get: (key) => map.get(key),
+      set: (key, value) => {
+        map.set(key, value)
+      },
+      delete: (key) => map.delete(key),
+      clear: () => map.clear(),
+      values: () => map.values(),
+    }
+  }
+
+  const map = new Map<string, WeakRef<V>>()
+  const registry = new FinalizationRegistry<string>((key) => {
+    map.delete(key)
+  })
+
+  return {
+    get: (key) => map.get(key)?.deref(),
+    set: (key, value) => {
+      map.set(key, new WeakRef(value))
+      registry.register(value, key)
+    },
+    delete: (key) => map.delete(key),
+    clear: () => map.clear(),
+    *values() {
+      for (const ref of map.values()) {
+        const value = ref.deref()
+        if (value !== undefined) yield value
+      }
+    },
+  }
+}
 
 interface ArrayItemContextValue {
   readonly index: number
@@ -246,7 +290,6 @@ const makeFieldComponent = <S extends Schema.Schema.Any>(
     const arrayCtx = useContext(ArrayItemContext)
     const fieldPath = arrayCtx ? `${arrayCtx.parentPath}.${fieldKey}` : fieldKey
 
-    // Get per-field atoms for fine-grained subscriptions
     const { crossFieldErrorAtom, initialValueAtom, touchedAtom, valueAtom } = React.useMemo(
       () => getOrCreateFieldAtoms(fieldPath),
       [fieldPath],
@@ -305,7 +348,6 @@ const makeFieldComponent = <S extends Schema.Schema.Any>(
     const isDirty = !Equal.equals(value, initialValue)
     const isValidating = validationResult.waiting
 
-    // Validation errors only show after field is touched to avoid premature error display on load
     return (
       <Component
         value={value}
@@ -613,7 +655,6 @@ export const build = <TFields extends Form.FieldsRecord, R, ER = never>(
   const stateAtom = Atom.make(initialState).pipe(Atom.setIdleTTL(0))
   const crossFieldErrorsAtom = Atom.make<Map<string, string>>(new Map()).pipe(Atom.setIdleTTL(0))
 
-  // Derived atom for isDirty - memoized at atom level, only recomputes when state changes
   // structuralRegion enables deep structural equality for nested objects
   const isDirtyAtom = Atom.readable((get) => {
     const state = get(stateAtom)
@@ -622,8 +663,10 @@ export const build = <TFields extends Form.FieldsRecord, R, ER = never>(
   const onSubmitAtom = Atom.make<Atom.AtomResultFn<Form.DecodedFromFields<TFields>, unknown, unknown> | null>(null)
     .pipe(Atom.setIdleTTL(0))
 
-  const validationAtomsRegistry: ValidationAtomRegistry = new Map()
-  const fieldAtomsRegistry: FieldAtomRegistry = new Map()
+  // WeakRef registries allow automatic cleanup via FinalizationRegistry when atoms are GC'd.
+  // Prevents memory leaks when array items are removed - atoms become unreferenced and auto-cleanup.
+  const validationAtomsRegistry = createWeakRegistry<Atom.AtomResultFn<unknown, void, ParseResult.ParseError>>()
+  const fieldAtomsRegistry = createWeakRegistry<FieldAtoms>()
 
   const getOrCreateValidationAtom = (
     fieldPath: string,
@@ -685,14 +728,12 @@ export const build = <TFields extends Form.FieldsRecord, R, ER = never>(
   }
 
   const resetValidationAtoms = (registry: Registry.Registry) => {
-    // Reset each validation atom to clear any errors
-    // This writes Atom.Reset which sets the internal counter to 0,
-    // causing the atom to return Result.initial() on next read
+    // Atom.Reset sets internal counter to 0, causing atom to return Result.initial() on next read.
+    // values() automatically skips GC'd atoms (WeakRef.deref() returns undefined).
     for (const validationAtom of validationAtomsRegistry.values()) {
       registry.set(validationAtom, Atom.Reset)
     }
-    // Clear registries so new atoms are created on next access
-    // Old atoms will be garbage collected due to setIdleTTL(0)
+    // Clear registries for immediate cleanup (FinalizationRegistry handles GC'd atoms automatically).
     validationAtomsRegistry.clear()
     fieldAtomsRegistry.clear()
   }
@@ -730,7 +771,7 @@ export const build = <TFields extends Form.FieldsRecord, R, ER = never>(
         touched: Form.createTouchedRecord(fields, false) as { readonly [K in keyof TFields]: boolean },
         submitCount: 0,
       })
-      // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional mount-only initialization
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only initialization
     }, [])
 
     return (

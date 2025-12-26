@@ -15,3 +15,4 @@ packages/*/docs
 npm-debug.log*
 pnpm-debug.log*
 .claude
+CLAUDE.local.md
