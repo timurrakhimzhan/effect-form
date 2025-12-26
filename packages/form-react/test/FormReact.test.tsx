@@ -88,7 +88,7 @@ describe("FormReact.build", () => {
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
         fields: { name: TextInput },
-        validationMode: "onBlur",
+        mode: "onBlur",
       })
 
       const onSubmit = form.submit(() => Effect.void)
@@ -662,7 +662,7 @@ describe("FormReact.build", () => {
       const form = FormReact.build(formBuilder, {
         runtime,
         fields: { asyncField: ValidatingInput },
-        validationMode: "onBlur",
+        mode: "onBlur",
       })
 
       const onSubmit = form.submit(() => Effect.void)
@@ -1005,7 +1005,7 @@ describe("FormReact.build", () => {
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
         fields: { name: TextInput },
-        validationMode: "onChange",
+        mode: "onChange",
       })
 
       const onSubmit = form.submit(() => Effect.void)
@@ -1038,7 +1038,7 @@ describe("FormReact.build", () => {
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
         fields: { name: TextInput },
-        validationMode: "onSubmit",
+        mode: "onSubmit",
       })
 
       const onSubmit = form.submit(() => Effect.void)
@@ -1069,7 +1069,7 @@ describe("FormReact.build", () => {
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
         fields: { name: TextInput },
-        validationMode: "onSubmit",
+        mode: "onSubmit",
       })
 
       const onSubmit = form.submit(() => Effect.void)

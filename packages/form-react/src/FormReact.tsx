@@ -1,13 +1,13 @@
 /**
  * @since 1.0.0
  */
-import { RegistryContext, useAtom, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { RegistryContext, useAtom, useAtomSet, useAtomSubscribe, useAtomValue } from "@effect-atom/atom-react"
 import * as Atom from "@effect-atom/atom/Atom"
 import type * as Registry from "@effect-atom/atom/Registry"
 import type * as Result from "@effect-atom/atom/Result"
 import { Form } from "@lucas-barake/effect-form"
 import * as Cause from "effect/Cause"
-import type * as Duration from "effect/Duration"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Equal from "effect/Equal"
 import { pipe } from "effect/Function"
@@ -19,20 +19,49 @@ import * as React from "react"
 import { createContext, useContext } from "react"
 
 // ================================
-// Validation Mode
+// Form Mode
 // ================================
 
 /**
- * Controls when field validation is triggered.
+ * Controls when field validation is triggered and whether form auto-submits.
  *
+ * Simple modes (string):
  * - `"onSubmit"`: Validation only runs when the form is submitted (default)
  * - `"onBlur"`: Validation runs when a field loses focus
- * - `"onChange"`: Validation runs on every value change
+ * - `"onChange"`: Validation runs on every value change (sync)
+ *
+ * Object modes (with options):
+ * - `{ onChange: { debounce, autoSubmit? } }`: Debounced validation, optional auto-submit
+ * - `{ onBlur: { autoSubmit: true } }`: Validate on blur, auto-submit when valid
  *
  * @since 1.0.0
  * @category Models
  */
-export type ValidationMode = "onChange" | "onBlur" | "onSubmit"
+export type FormMode =
+  | "onSubmit"
+  | "onBlur"
+  | "onChange"
+  | { readonly onChange: { readonly debounce: Duration.DurationInput; readonly autoSubmit?: false } }
+  | { readonly onBlur: { readonly autoSubmit: true } }
+  | { readonly onChange: { readonly debounce: Duration.DurationInput; readonly autoSubmit: true } }
+
+interface ParsedMode {
+  readonly validation: "onSubmit" | "onBlur" | "onChange"
+  readonly debounce: number | null
+  readonly autoSubmit: boolean
+}
+
+const parseMode = (mode: FormMode = "onSubmit"): ParsedMode => {
+  if (typeof mode === "string") {
+    return { validation: mode, debounce: null, autoSubmit: false }
+  }
+  if ("onBlur" in mode) {
+    return { validation: "onBlur", debounce: null, autoSubmit: true }
+  }
+  const debounceMs = Duration.toMillis(mode.onChange.debounce)
+  const autoSubmit = mode.onChange.autoSubmit === true
+  return { validation: "onChange", debounce: debounceMs, autoSubmit }
+}
 
 // ================================
 // Field Component Props
@@ -124,7 +153,6 @@ export type BuiltForm<TFields extends Form.FieldsRecord, R> = {
   readonly Form: React.FC<{
     readonly defaultValues: Form.EncodedFromFields<TFields>
     readonly onSubmit: Atom.AtomResultFn<Form.DecodedFromFields<TFields>, unknown, unknown>
-    readonly debounce?: Duration.DurationInput
     readonly children: React.ReactNode
   }>
 
@@ -228,6 +256,7 @@ interface ArrayItemContextValue {
 }
 
 const ArrayItemContext = createContext<ArrayItemContextValue | null>(null)
+const AutoSubmitContext = createContext<(() => void) | null>(null)
 
 // ================================
 // Utilities
@@ -270,6 +299,44 @@ const extractFirstError = (error: ParseResult.ParseError): Option.Option<string>
   return Option.some(issues[0].message)
 }
 
+const useDebounced = <T extends (...args: ReadonlyArray<any>) => void>(
+  fn: T,
+  delayMs: number | null,
+): T => {
+  const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const fnRef = React.useRef(fn)
+
+  React.useEffect(() => {
+    fnRef.current = fn
+  })
+
+  React.useEffect(() => {
+    return () => {
+      if (timeoutRef.current !== null) {
+        clearTimeout(timeoutRef.current)
+      }
+    }
+  }, [])
+
+  return React.useMemo(
+    () =>
+      ((...args: Parameters<T>) => {
+        if (delayMs === null || delayMs === 0) {
+          fnRef.current(...args)
+          return
+        }
+        if (timeoutRef.current !== null) {
+          clearTimeout(timeoutRef.current)
+        }
+        timeoutRef.current = setTimeout(() => {
+          fnRef.current(...args)
+          timeoutRef.current = null
+        }, delayMs)
+      }) as T,
+    [delayMs],
+  )
+}
+
 // ================================
 // Field Component Factory
 // ================================
@@ -278,7 +345,7 @@ const makeFieldComponent = <S extends Schema.Schema.Any>(
   fieldKey: string,
   fieldDef: Form.FieldDef<S>,
   crossFieldErrorsAtom: Atom.Writable<Map<string, string>, Map<string, string>>,
-  validationMode: ValidationMode,
+  parsedMode: ParsedMode,
   getOrCreateValidationAtom: (
     fieldPath: string,
     schema: Schema.Schema.Any,
@@ -288,6 +355,7 @@ const makeFieldComponent = <S extends Schema.Schema.Any>(
 ): React.FC => {
   const FieldComponent: React.FC = () => {
     const arrayCtx = useContext(ArrayItemContext)
+    const autoSubmitOnBlur = useContext(AutoSubmitContext)
     const fieldPath = arrayCtx ? `${arrayCtx.parentPath}.${fieldKey}` : fieldKey
 
     const { crossFieldErrorAtom, initialValueAtom, touchedAtom, valueAtom } = React.useMemo(
@@ -306,7 +374,14 @@ const makeFieldComponent = <S extends Schema.Schema.Any>(
       [fieldPath],
     )
     const validationResult = useAtomValue(validationAtom)
-    const validate = useAtomSet(validationAtom)
+    const validateImmediate = useAtomSet(validationAtom)
+
+    // For onChange mode with debounce (non-autoSubmit), use debounced validation
+    // For autoSubmit mode, debouncing is handled at form level
+    const shouldDebounceValidation = parsedMode.validation === "onChange"
+      && parsedMode.debounce !== null
+      && !parsedMode.autoSubmit
+    const validate = useDebounced(validateImmediate, shouldDebounceValidation ? parsedMode.debounce : null)
 
     const perFieldError: Option.Option<string> = React.useMemo(() => {
       if (validationResult._tag === "Failure") {
@@ -331,7 +406,7 @@ const makeFieldComponent = <S extends Schema.Schema.Any>(
           }
           return prev
         })
-        if (validationMode === "onChange") {
+        if (parsedMode.validation === "onChange") {
           validate(newValue)
         }
       },
@@ -340,10 +415,11 @@ const makeFieldComponent = <S extends Schema.Schema.Any>(
 
     const onBlur = React.useCallback(() => {
       setTouched(true)
-      if (validationMode === "onBlur") {
+      if (parsedMode.validation === "onBlur") {
         validate(value)
       }
-    }, [setTouched, validate, value])
+      autoSubmitOnBlur?.()
+    }, [setTouched, validate, value, autoSubmitOnBlur])
 
     const isDirty = !Equal.equals(value, initialValue)
     const isValidating = validationResult.waiting
@@ -373,7 +449,7 @@ const makeArrayFieldComponent = <TItemFields extends Form.FieldsRecord>(
   def: Form.ArrayFieldDef<Form.FormBuilder<TItemFields, any>>,
   stateAtom: Atom.Writable<Form.FormState<any>, any>,
   crossFieldErrorsAtom: Atom.Writable<Map<string, string>, Map<string, string>>,
-  validationMode: ValidationMode,
+  parsedMode: ParsedMode,
   getOrCreateValidationAtom: (
     fieldPath: string,
     schema: Schema.Schema.Any,
@@ -509,7 +585,7 @@ const makeArrayFieldComponent = <TItemFields extends Form.FieldsRecord>(
         itemKey,
         itemDef,
         crossFieldErrorsAtom,
-        validationMode,
+        parsedMode,
         getOrCreateValidationAtom,
         getOrCreateFieldAtoms,
         itemComponent,
@@ -540,7 +616,7 @@ const makeFieldComponents = <TFields extends Form.FieldsRecord>(
   fields: TFields,
   stateAtom: Atom.Writable<Form.FormState<TFields>, any>,
   crossFieldErrorsAtom: Atom.Writable<Map<string, string>, Map<string, string>>,
-  validationMode: ValidationMode,
+  parsedMode: ParsedMode,
   getOrCreateValidationAtom: (
     fieldPath: string,
     schema: Schema.Schema.Any,
@@ -558,7 +634,7 @@ const makeFieldComponents = <TFields extends Form.FieldsRecord>(
         def,
         stateAtom,
         crossFieldErrorsAtom,
-        validationMode,
+        parsedMode,
         getOrCreateValidationAtom,
         getOrCreateFieldAtoms,
         arrayComponentMap,
@@ -569,7 +645,7 @@ const makeFieldComponents = <TFields extends Form.FieldsRecord>(
         key,
         def,
         crossFieldErrorsAtom,
-        validationMode,
+        parsedMode,
         getOrCreateValidationAtom,
         getOrCreateFieldAtoms,
         fieldComponent,
@@ -637,10 +713,11 @@ export const build = <TFields extends Form.FieldsRecord, R, ER = never>(
   options: {
     readonly runtime: Atom.AtomRuntime<R, ER>
     readonly fields: FieldComponentMap<TFields>
-    readonly validationMode?: ValidationMode
+    readonly mode?: FormMode
   },
 ): BuiltForm<TFields, R> => {
-  const { fields: components, runtime, validationMode = "onSubmit" } = options
+  const { fields: components, mode, runtime } = options
+  const parsedMode = parseMode(mode)
   const { fields } = self
 
   const combinedSchema = Form.buildSchema(self)
@@ -754,11 +831,12 @@ export const build = <TFields extends Form.FieldsRecord, R, ER = never>(
   const FormComponent: React.FC<{
     readonly defaultValues: Form.EncodedFromFields<TFields>
     readonly onSubmit: Atom.AtomResultFn<Form.DecodedFromFields<TFields>, unknown, unknown>
-    readonly debounce?: Duration.DurationInput
     readonly children: React.ReactNode
   }> = ({ children, defaultValues, onSubmit }) => {
+    const registry = React.useContext(RegistryContext)
     const setFormState = useAtomSet(stateAtom)
     const setOnSubmit = useAtomSet(onSubmitAtom)
+    const callDecodeAndSubmit = useAtomSet(decodeAndSubmit)
 
     React.useEffect(() => {
       setOnSubmit(onSubmit)
@@ -774,15 +852,40 @@ export const build = <TFields extends Form.FieldsRecord, R, ER = never>(
       // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only initialization
     }, [])
 
+    // Form-level debounced auto-submit prevents double submissions when multiple fields change rapidly
+    const debouncedAutoSubmit = useDebounced(() => {
+      const currentValues = registry.get(stateAtom).values
+      callDecodeAndSubmit(currentValues)
+    }, parsedMode.autoSubmit && parsedMode.validation === "onChange" ? parsedMode.debounce : null)
+
+    useAtomSubscribe(
+      stateAtom,
+      React.useCallback(() => {
+        if (parsedMode.autoSubmit && parsedMode.validation === "onChange") {
+          debouncedAutoSubmit()
+        }
+      }, [debouncedAutoSubmit]),
+      { immediate: false },
+    )
+
+    const onBlurAutoSubmit = React.useCallback(() => {
+      if (parsedMode.autoSubmit && parsedMode.validation === "onBlur") {
+        const currentValues = registry.get(stateAtom).values
+        callDecodeAndSubmit(currentValues)
+      }
+    }, [registry, callDecodeAndSubmit])
+
     return (
-      <form
-        onSubmit={(e) => {
-          e.preventDefault()
-          e.stopPropagation()
-        }}
-      >
-        {children}
-      </form>
+      <AutoSubmitContext.Provider value={onBlurAutoSubmit}>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+          }}
+        >
+          {children}
+        </form>
+      </AutoSubmitContext.Provider>
     )
   }
 
@@ -859,7 +962,7 @@ export const build = <TFields extends Form.FieldsRecord, R, ER = never>(
     fields,
     stateAtom,
     crossFieldErrorsAtom,
-    validationMode,
+    parsedMode,
     getOrCreateValidationAtom,
     getOrCreateFieldAtoms,
     components,
