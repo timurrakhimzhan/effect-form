@@ -8,11 +8,12 @@
     "clean": "node scripts/clean.mjs",
     "build": "tsc -b tsconfig.build.json && pnpm -r run build",
     "circular": "madge --extensions ts --circular --no-color --no-spinner packages/*/src",
-    "lint": "eslint \"**/{src,test}/**/*.{ts,tsx,mjs}\"",
-    "lint-fix": "pnpm lint --fix",
+    "check:types": "tsc -b tsconfig.json",
+    "check:lint": "eslint \"**/{src,test}/**/*.{ts,tsx,mjs}\"",
+    "check:lint-fix": "pnpm lint --fix",
+    "check:all": "pnpm check:types && pnpm check:lint && pnpm test",
     "test": "vitest",
-    "coverage": "vitest --coverage",
-    "check": "tsc -b tsconfig.json"
+    "coverage": "vitest --coverage"
   },
   "devDependencies": {
     "@babel/cli": "^7.28.3",

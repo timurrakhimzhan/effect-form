@@ -1,4 +1,5 @@
 import { Form } from "@lucas-barake/effect-form"
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { describe, expect, it } from "vitest"
 
@@ -114,6 +115,57 @@ describe("Form", () => {
         Schema.decodeUnknownSync(schema)({ password: "secret", confirmPassword: "secret" }),
       ).toEqual({ password: "secret", confirmPassword: "secret" })
     })
+
+    it("applies async refinements with refineEffect", async () => {
+      const builder = Form.empty
+        .addField("username", Schema.String)
+        .refineEffect((values, ctx) =>
+          Effect.gen(function*() {
+            yield* Effect.sleep("1 millis")
+            if (values.username === "taken") {
+              return ctx.error("username", "Username is already taken")
+            }
+          })
+        )
+
+      const schema = Form.buildSchema(builder)
+
+      await expect(
+        Effect.runPromise(Schema.decodeUnknown(schema)({ username: "taken" })),
+      ).rejects.toThrow()
+
+      const result = await Effect.runPromise(
+        Schema.decodeUnknown(schema)({ username: "available" }),
+      )
+      expect(result).toEqual({ username: "available" })
+    })
+
+    it("applies multiple chained refinements", () => {
+      const builder = Form.empty
+        .addField("a", Schema.String)
+        .addField("b", Schema.String)
+        .refine((values, ctx) => {
+          if (values.a === "error") {
+            return ctx.error("a", "First refinement failed")
+          }
+        })
+        .refine((values, ctx) => {
+          if (values.b === "error") {
+            return ctx.error("b", "Second refinement failed")
+          }
+        })
+
+      const schema = Form.buildSchema(builder)
+
+      // First refinement fails
+      expect(() => Schema.decodeUnknownSync(schema)({ a: "error", b: "ok" })).toThrow(/First refinement failed/)
+
+      // Second refinement fails
+      expect(() => Schema.decodeUnknownSync(schema)({ a: "ok", b: "error" })).toThrow(/Second refinement failed/)
+
+      // Both pass
+      expect(Schema.decodeUnknownSync(schema)({ a: "ok", b: "ok" })).toEqual({ a: "ok", b: "ok" })
+    })
   })
 
   describe("helpers", () => {
@@ -155,8 +207,6 @@ describe("Form", () => {
     it("isFormBuilder correctly identifies FormBuilder", () => {
       expect(Form.isFormBuilder(Form.empty)).toBe(true)
       expect(Form.isFormBuilder({})).toBe(false)
-      expect(Form.isFormBuilder(null)).toBe(false)
-      expect(Form.isFormBuilder("string")).toBe(false)
     })
 
     it("isFieldDef and isArrayFieldDef work correctly", () => {

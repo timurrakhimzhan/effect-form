@@ -1,8 +1,10 @@
 /**
  * @since 1.0.0
  */
-import { useAtom, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
+import { RegistryContext, useAtom, useAtomSet, useAtomValue } from "@effect-atom/atom-react"
 import * as Atom from "@effect-atom/atom/Atom"
+import type * as Registry from "@effect-atom/atom/Registry"
+import type * as Result from "@effect-atom/atom/Result"
 import { Form } from "@lucas-barake/effect-form"
 import * as Cause from "effect/Cause"
 import type * as Duration from "effect/Duration"
@@ -12,6 +14,7 @@ import { pipe } from "effect/Function"
 import * as Option from "effect/Option"
 import * as ParseResult from "effect/ParseResult"
 import * as Schema from "effect/Schema"
+import * as Utils from "effect/Utils"
 import * as React from "react"
 import { createContext, useContext } from "react"
 
@@ -98,8 +101,9 @@ export interface ArrayFieldOperations<TItem> {
 export interface SubscribeState<TFields extends Form.FieldsRecord> {
   readonly values: Form.EncodedFromFields<TFields>
   readonly isDirty: boolean
-  readonly isSubmitting: boolean
+  readonly submitResult: Result.Result<unknown, unknown>
   readonly submit: () => void
+  readonly reset: () => void
 }
 
 // ================================
@@ -130,8 +134,9 @@ export type BuiltForm<TFields extends Form.FieldsRecord, R> = {
 
   readonly useForm: () => {
     readonly submit: () => void
+    readonly reset: () => void
     readonly isDirty: boolean
-    readonly isSubmitting: boolean
+    readonly submitResult: Result.Result<unknown, unknown>
   }
 
   readonly submit: <A, E>(
@@ -162,6 +167,15 @@ interface ArrayFieldComponent<TItemFields extends Form.FieldsRecord> extends
 // ================================
 
 type ValidationAtomRegistry = Map<string, Atom.AtomResultFn<unknown, void, ParseResult.ParseError>>
+
+interface FieldAtoms {
+  readonly valueAtom: Atom.Writable<unknown, unknown>
+  readonly initialValueAtom: Atom.Atom<unknown>
+  readonly touchedAtom: Atom.Writable<boolean, boolean>
+  readonly crossFieldErrorAtom: Atom.Atom<Option.Option<string>>
+}
+
+type FieldAtomRegistry = Map<string, FieldAtoms>
 
 interface ArrayItemContextValue {
   readonly index: number
@@ -218,21 +232,30 @@ const extractFirstError = (error: ParseResult.ParseError): Option.Option<string>
 const makeFieldComponent = <S extends Schema.Schema.Any>(
   fieldKey: string,
   fieldDef: Form.FieldDef<S>,
-  stateAtom: Atom.Writable<Form.FormState<any>, any>,
   crossFieldErrorsAtom: Atom.Writable<Map<string, string>, Map<string, string>>,
   validationMode: ValidationMode,
   getOrCreateValidationAtom: (
     fieldPath: string,
     schema: Schema.Schema.Any,
   ) => Atom.AtomResultFn<unknown, void, ParseResult.ParseError>,
+  getOrCreateFieldAtoms: (fieldPath: string) => FieldAtoms,
   Component: React.FC<FieldComponentProps<S>>,
 ): React.FC => {
   const FieldComponent: React.FC = () => {
     const arrayCtx = useContext(ArrayItemContext)
-    const [formState, setFormState] = useAtom(stateAtom)
-    const [crossFieldErrors, setCrossFieldErrors] = useAtom(crossFieldErrorsAtom)
-
     const fieldPath = arrayCtx ? `${arrayCtx.parentPath}.${fieldKey}` : fieldKey
+
+    // Get per-field atoms for fine-grained subscriptions
+    const { crossFieldErrorAtom, initialValueAtom, touchedAtom, valueAtom } = React.useMemo(
+      () => getOrCreateFieldAtoms(fieldPath),
+      [fieldPath],
+    )
+
+    const [value, setValue] = useAtom(valueAtom) as [Schema.Schema.Encoded<S>, (v: unknown) => void]
+    const initialValue = useAtomValue(initialValueAtom) as Schema.Schema.Encoded<S>
+    const [isTouched, setTouched] = useAtom(touchedAtom)
+    const crossFieldError = useAtomValue(crossFieldErrorAtom)
+    const setCrossFieldErrors = useAtomSet(crossFieldErrorsAtom)
 
     const validationAtom = React.useMemo(
       () => getOrCreateValidationAtom(fieldPath, fieldDef.schema),
@@ -240,10 +263,6 @@ const makeFieldComponent = <S extends Schema.Schema.Any>(
     )
     const validationResult = useAtomValue(validationAtom)
     const validate = useAtomSet(validationAtom)
-
-    const value = getNestedValue(formState.values, fieldPath) as Schema.Schema.Encoded<S>
-    const initialValue = getNestedValue(formState.initialValues, fieldPath) as Schema.Schema.Encoded<S>
-    const isTouched = (getNestedValue(formState.touched, fieldPath) ?? false) as boolean
 
     const perFieldError: Option.Option<string> = React.useMemo(() => {
       if (validationResult._tag === "Failure") {
@@ -255,19 +274,11 @@ const makeFieldComponent = <S extends Schema.Schema.Any>(
       return Option.none()
     }, [validationResult])
 
-    const crossFieldError: Option.Option<string> = React.useMemo(() => {
-      const error = crossFieldErrors.get(fieldPath)
-      return error !== undefined ? Option.some(error) : Option.none()
-    }, [crossFieldErrors, fieldPath])
-
     const validationError = Option.isSome(perFieldError) ? perFieldError : crossFieldError
 
     const onChange = React.useCallback(
       (newValue: Schema.Schema.Encoded<S>) => {
-        setFormState((prev: Form.FormState<any>) => ({
-          ...prev,
-          values: setNestedValue(prev.values, fieldPath, newValue),
-        }))
+        setValue(newValue)
         setCrossFieldErrors((prev) => {
           if (prev.has(fieldPath)) {
             const next = new Map(prev)
@@ -280,22 +291,20 @@ const makeFieldComponent = <S extends Schema.Schema.Any>(
           validate(newValue)
         }
       },
-      [fieldPath, setFormState, setCrossFieldErrors, validate],
+      [fieldPath, setValue, setCrossFieldErrors, validate],
     )
 
     const onBlur = React.useCallback(() => {
-      setFormState((prev: Form.FormState<any>) => ({
-        ...prev,
-        touched: setNestedValue(prev.touched, fieldPath, true),
-      }))
+      setTouched(true)
       if (validationMode === "onBlur") {
         validate(value)
       }
-    }, [fieldPath, setFormState, validate, value])
+    }, [setTouched, validate, value])
 
     const isDirty = !Equal.equals(value, initialValue)
     const isValidating = validationResult.waiting
 
+    // Validation errors only show after field is touched to avoid premature error display on load
     return (
       <Component
         value={value}
@@ -326,6 +335,7 @@ const makeArrayFieldComponent = <TItemFields extends Form.FieldsRecord>(
     fieldPath: string,
     schema: Schema.Schema.Any,
   ) => Atom.AtomResultFn<unknown, void, ParseResult.ParseError>,
+  getOrCreateFieldAtoms: (fieldPath: string) => FieldAtoms,
   componentMap: FieldComponentMap<TItemFields>,
 ): ArrayFieldComponent<TItemFields> => {
   const ArrayWrapper: React.FC<{
@@ -345,53 +355,73 @@ const makeArrayFieldComponent = <TItemFields extends Form.FieldsRecord>(
         const newItem = (value ?? Form.getDefaultEncodedValues(def.itemForm.fields)) as Form.EncodedFromFields<
           TItemFields
         >
-        setFormState((prev: Form.FormState<any>) => ({
-          ...prev,
-          values: setNestedValue(prev.values, fieldPath, [...items, newItem]),
-        }))
+        setFormState((prev: Form.FormState<any>) => {
+          const currentItems = (getNestedValue(prev.values, fieldPath) ?? []) as ReadonlyArray<
+            Form.EncodedFromFields<TItemFields>
+          >
+          return {
+            ...prev,
+            values: setNestedValue(prev.values, fieldPath, [...currentItems, newItem]),
+          }
+        })
       },
-      [fieldPath, items, setFormState],
+      [fieldPath, setFormState],
     )
 
     const remove = React.useCallback(
       (index: number) => {
-        setFormState((prev: Form.FormState<any>) => ({
-          ...prev,
-          values: setNestedValue(
-            prev.values,
-            fieldPath,
-            items.filter((_, i) => i !== index),
-          ),
-        }))
+        setFormState((prev: Form.FormState<any>) => {
+          const currentItems = (getNestedValue(prev.values, fieldPath) ?? []) as ReadonlyArray<
+            Form.EncodedFromFields<TItemFields>
+          >
+          return {
+            ...prev,
+            values: setNestedValue(
+              prev.values,
+              fieldPath,
+              currentItems.filter((_, i) => i !== index),
+            ),
+          }
+        })
       },
-      [fieldPath, items, setFormState],
+      [fieldPath, setFormState],
     )
 
     const swap = React.useCallback(
       (indexA: number, indexB: number) => {
-        const newItems = [...items]
-        const temp = newItems[indexA]
-        newItems[indexA] = newItems[indexB]
-        newItems[indexB] = temp
-        setFormState((prev: Form.FormState<any>) => ({
-          ...prev,
-          values: setNestedValue(prev.values, fieldPath, newItems),
-        }))
+        setFormState((prev: Form.FormState<any>) => {
+          const currentItems = (getNestedValue(prev.values, fieldPath) ?? []) as ReadonlyArray<
+            Form.EncodedFromFields<TItemFields>
+          >
+          const newItems = [...currentItems]
+          const temp = newItems[indexA]
+          newItems[indexA] = newItems[indexB]
+          newItems[indexB] = temp
+          return {
+            ...prev,
+            values: setNestedValue(prev.values, fieldPath, newItems),
+          }
+        })
       },
-      [fieldPath, items, setFormState],
+      [fieldPath, setFormState],
     )
 
     const move = React.useCallback(
       (from: number, to: number) => {
-        const newItems = [...items]
-        const [item] = newItems.splice(from, 1)
-        newItems.splice(to, 0, item)
-        setFormState((prev: Form.FormState<any>) => ({
-          ...prev,
-          values: setNestedValue(prev.values, fieldPath, newItems),
-        }))
+        setFormState((prev: Form.FormState<any>) => {
+          const currentItems = (getNestedValue(prev.values, fieldPath) ?? []) as ReadonlyArray<
+            Form.EncodedFromFields<TItemFields>
+          >
+          const newItems = [...currentItems]
+          const [item] = newItems.splice(from, 1)
+          newItems.splice(to, 0, item)
+          return {
+            ...prev,
+            values: setNestedValue(prev.values, fieldPath, newItems),
+          }
+        })
       },
-      [fieldPath, items, setFormState],
+      [fieldPath, setFormState],
     )
 
     return <>{children({ items, append, remove, swap, move })}</>
@@ -413,15 +443,18 @@ const makeArrayFieldComponent = <TItemFields extends Form.FieldsRecord>(
     )
 
     const remove = React.useCallback(() => {
-      setFormState((prev: Form.FormState<any>) => ({
-        ...prev,
-        values: setNestedValue(
-          prev.values,
-          parentPath,
-          (items as Array<any>).filter((_, i) => i !== index),
-        ),
-      }))
-    }, [parentPath, items, index, setFormState])
+      setFormState((prev: Form.FormState<any>) => {
+        const currentItems = (getNestedValue(prev.values, parentPath) ?? []) as Array<any>
+        return {
+          ...prev,
+          values: setNestedValue(
+            prev.values,
+            parentPath,
+            currentItems.filter((_, i) => i !== index),
+          ),
+        }
+      })
+    }, [parentPath, index, setFormState])
 
     return (
       <ArrayItemContext.Provider value={{ index, parentPath: itemPath }}>
@@ -437,10 +470,10 @@ const makeArrayFieldComponent = <TItemFields extends Form.FieldsRecord>(
       itemFieldComponents[itemKey] = makeFieldComponent(
         itemKey,
         itemDef,
-        stateAtom,
         crossFieldErrorsAtom,
         validationMode,
         getOrCreateValidationAtom,
+        getOrCreateFieldAtoms,
         itemComponent,
       )
     }
@@ -474,6 +507,7 @@ const makeFieldComponents = <TFields extends Form.FieldsRecord>(
     fieldPath: string,
     schema: Schema.Schema.Any,
   ) => Atom.AtomResultFn<unknown, void, ParseResult.ParseError>,
+  getOrCreateFieldAtoms: (fieldPath: string) => FieldAtoms,
   componentMap: FieldComponentMap<TFields>,
 ): FieldComponents<TFields> => {
   const components: Record<string, any> = {}
@@ -488,6 +522,7 @@ const makeFieldComponents = <TFields extends Form.FieldsRecord>(
         crossFieldErrorsAtom,
         validationMode,
         getOrCreateValidationAtom,
+        getOrCreateFieldAtoms,
         arrayComponentMap,
       )
     } else if (Form.isFieldDef(def)) {
@@ -495,10 +530,10 @@ const makeFieldComponents = <TFields extends Form.FieldsRecord>(
       components[key] = makeFieldComponent(
         key,
         def,
-        stateAtom,
         crossFieldErrorsAtom,
         validationMode,
         getOrCreateValidationAtom,
+        getOrCreateFieldAtoms,
         fieldComponent,
       )
     }
@@ -585,6 +620,7 @@ export const build = <TFields extends Form.FieldsRecord, R, ER = never>(
     .pipe(Atom.setIdleTTL(0))
 
   const validationAtomsRegistry: ValidationAtomRegistry = new Map()
+  const fieldAtomsRegistry: FieldAtomRegistry = new Map()
 
   const getOrCreateValidationAtom = (
     fieldPath: string,
@@ -598,30 +634,78 @@ export const build = <TFields extends Form.FieldsRecord, R, ER = never>(
         Schema.decodeUnknown(schema)(value) as Effect.Effect<unknown, ParseResult.ParseError, R>,
         Effect.asVoid,
       )
-    ) as Atom.AtomResultFn<unknown, void, ParseResult.ParseError>
+    ).pipe(Atom.setIdleTTL(0)) as Atom.AtomResultFn<unknown, void, ParseResult.ParseError>
 
     validationAtomsRegistry.set(fieldPath, validationAtom)
     return validationAtom
   }
 
+  const getOrCreateFieldAtoms = (fieldPath: string): FieldAtoms => {
+    const existing = fieldAtomsRegistry.get(fieldPath)
+    if (existing) return existing
+
+    const valueAtom = Atom.writable(
+      (get) => getNestedValue(get(stateAtom).values, fieldPath),
+      (ctx, value) => {
+        const currentState = ctx.get(stateAtom)
+        ctx.set(stateAtom, {
+          ...currentState,
+          values: setNestedValue(currentState.values, fieldPath, value),
+        })
+      },
+    ).pipe(Atom.setIdleTTL(0))
+
+    const initialValueAtom = Atom.readable(
+      (get) => getNestedValue(get(stateAtom).initialValues, fieldPath),
+    ).pipe(Atom.setIdleTTL(0))
+
+    const touchedAtom = Atom.writable(
+      (get) => (getNestedValue(get(stateAtom).touched, fieldPath) ?? false) as boolean,
+      (ctx, value) => {
+        const currentState = ctx.get(stateAtom)
+        ctx.set(stateAtom, {
+          ...currentState,
+          touched: setNestedValue(currentState.touched, fieldPath, value),
+        })
+      },
+    ).pipe(Atom.setIdleTTL(0))
+
+    const crossFieldErrorAtom = Atom.readable((get) => {
+      const errors = get(crossFieldErrorsAtom)
+      const error = errors.get(fieldPath)
+      return error !== undefined ? Option.some(error) : Option.none<string>()
+    }).pipe(Atom.setIdleTTL(0))
+
+    const atoms: FieldAtoms = { valueAtom, initialValueAtom, touchedAtom, crossFieldErrorAtom }
+    fieldAtomsRegistry.set(fieldPath, atoms)
+    return atoms
+  }
+
+  const resetValidationAtoms = (registry: Registry.Registry) => {
+    // Reset each validation atom to clear any errors
+    // This writes Atom.Reset which sets the internal counter to 0,
+    // causing the atom to return Result.initial() on next read
+    for (const validationAtom of validationAtomsRegistry.values()) {
+      registry.set(validationAtom, Atom.Reset)
+    }
+    // Clear registries so new atoms are created on next access
+    // Old atoms will be garbage collected due to setIdleTTL(0)
+    validationAtomsRegistry.clear()
+    fieldAtomsRegistry.clear()
+  }
+
   const decodeAndSubmit = runtime.fn<Form.EncodedFromFields<TFields>>()((values, get) =>
-    pipe(
-      Schema.decodeUnknown(combinedSchema)(values) as Effect.Effect<
+    Effect.gen(function*() {
+      const decoded = yield* Schema.decodeUnknown(combinedSchema)(values) as Effect.Effect<
         Form.DecodedFromFields<TFields>,
         ParseResult.ParseError,
         R
-      >,
-      Effect.tap((decoded) =>
-        Effect.sync(() => {
-          const onSubmit = get(onSubmitAtom)
-          if (onSubmit) {
-            get.set(onSubmit, decoded)
-          }
-        })
-      ),
-      Effect.asVoid,
-    )
-  ) as Atom.AtomResultFn<Form.EncodedFromFields<TFields>, void, ParseResult.ParseError>
+      >
+      const onSubmit = get(onSubmitAtom)!
+      get.set(onSubmit, decoded)
+      return yield* get.result(onSubmit, { suspendOnWaiting: true })
+    })
+  ).pipe(Atom.setIdleTTL(0)) as Atom.AtomResultFn<Form.EncodedFromFields<TFields>, unknown, unknown>
 
   const FormComponent: React.FC<{
     readonly defaultValues: Form.EncodedFromFields<TFields>
@@ -659,6 +743,7 @@ export const build = <TFields extends Form.FieldsRecord, R, ER = never>(
   }
 
   const useFormHook = () => {
+    const registry = React.useContext(RegistryContext)
     const [formState, setFormState] = useAtom(stateAtom)
     const setCrossFieldErrors = useAtomSet(crossFieldErrorsAtom)
     const [decodeAndSubmitResult, callDecodeAndSubmit] = useAtom(decodeAndSubmit)
@@ -697,19 +782,30 @@ export const build = <TFields extends Form.FieldsRecord, R, ER = never>(
       callDecodeAndSubmit(formState.values)
     }, [formState.values, setFormState, callDecodeAndSubmit, setCrossFieldErrors])
 
-    const isDirty = !Equal.equals(formState.values, formState.initialValues)
-    const isSubmitting = decodeAndSubmitResult.waiting
+    const reset = React.useCallback(() => {
+      setFormState((prev: Form.FormState<any>) => ({
+        values: prev.initialValues,
+        initialValues: prev.initialValues,
+        touched: Form.createTouchedRecord(fields, false) as { readonly [K in keyof TFields]: boolean },
+        submitCount: 0,
+      }))
+      setCrossFieldErrors(new Map())
+      resetValidationAtoms(registry)
+      callDecodeAndSubmit(Atom.Reset)
+    }, [setFormState, setCrossFieldErrors, callDecodeAndSubmit, registry])
 
-    return { submit, isDirty, isSubmitting }
+    const isDirty = !Utils.structuralRegion(() => Equal.equals(formState.values, formState.initialValues))
+
+    return { submit, reset, isDirty, submitResult: decodeAndSubmitResult }
   }
 
   const SubscribeComponent: React.FC<{
     readonly children: (state: SubscribeState<TFields>) => React.ReactNode
   }> = ({ children }) => {
-    const { isDirty, isSubmitting, submit } = useFormHook()
+    const { isDirty, reset, submit, submitResult } = useFormHook()
     const formState = useAtomValue(stateAtom)
 
-    return <>{children({ values: formState.values, isDirty, isSubmitting, submit })}</>
+    return <>{children({ values: formState.values, isDirty, submitResult, submit, reset })}</>
   }
 
   const submitHelper = <A, E>(
@@ -722,6 +818,7 @@ export const build = <TFields extends Form.FieldsRecord, R, ER = never>(
     crossFieldErrorsAtom,
     validationMode,
     getOrCreateValidationAtom,
+    getOrCreateFieldAtoms,
     components,
   )
 

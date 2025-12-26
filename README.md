@@ -111,9 +111,9 @@ function LoginDialog({ onClose }) {
 
       {/* Render-prop pattern */}
       <form.Subscribe>
-        {({ isDirty, isSubmitting, submit }) => (
-          <button onClick={submit} disabled={!isDirty || isSubmitting}>
-            {isSubmitting ? "Saving..." : "Login"}
+        {({ isDirty, submitResult, submit }) => (
+          <button onClick={submit} disabled={!isDirty || submitResult.waiting}>
+            {submitResult.waiting ? "Saving..." : "Login"}
           </button>
         )}
       </form.Subscribe>
@@ -121,6 +121,54 @@ function LoginDialog({ onClose }) {
   )
 }
 ```
+
+## Submission Result
+
+The `submitResult` object tracks the full submission lifecycle (validation + your submit handler). It's a `Result` from `@effect-atom/atom`:
+
+```tsx
+import * as Result from "@effect-atom/atom/Result"
+
+function SubmitButton() {
+  const { submit, submitResult } = form.useForm()
+
+  // Check if submitting (validation or handler running)
+  if (submitResult.waiting) {
+    return <button disabled>Submitting...</button>
+  }
+
+  // Check result state
+  if (Result.isSuccess(submitResult)) {
+    return <span>Submitted successfully!</span>
+  }
+
+  if (Result.isFailure(submitResult)) {
+    // Access error via submitResult.cause
+    return <span>Submission failed</span>
+  }
+
+  return <button onClick={submit}>Submit</button>
+}
+```
+
+## Resetting the Form
+
+Use `reset()` to restore the form to its initial values (the `defaultValues` passed on mount):
+
+```tsx
+function FormWithReset() {
+  const { submit, reset, isDirty } = form.useForm()
+
+  return (
+    <>
+      <button onClick={submit} disabled={!isDirty}>Submit</button>
+      <button onClick={reset} disabled={!isDirty}>Reset</button>
+    </>
+  )
+}
+```
+
+Reset also clears the `submitResult` back to its initial state.
 
 ## Cross-Field Validation
 
