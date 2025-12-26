@@ -123,12 +123,13 @@ describe("FormReact.build", () => {
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
         fields: { name: TextInput },
+        validationMode: "onBlur",
       })
 
       const onSubmit = form.submit(() => Effect.void)
 
       render(
-        <form.Form defaultValues={{ name: "" }} onSubmit={onSubmit} validationMode="onBlur">
+        <form.Form defaultValues={{ name: "" }} onSubmit={onSubmit}>
           <form.name />
         </form.Form>,
       )
@@ -569,12 +570,13 @@ describe("FormReact.build", () => {
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
         fields: { name: TextInput },
+        validationMode: "onChange",
       })
 
       const onSubmit = form.submit(() => Effect.void)
 
       render(
-        <form.Form defaultValues={{ name: "test" }} onSubmit={onSubmit} validationMode="onChange">
+        <form.Form defaultValues={{ name: "test" }} onSubmit={onSubmit}>
           <form.name />
         </form.Form>,
       )
@@ -601,12 +603,13 @@ describe("FormReact.build", () => {
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
         fields: { name: TextInput },
+        validationMode: "onSubmit",
       })
 
       const onSubmit = form.submit(() => Effect.void)
 
       render(
-        <form.Form defaultValues={{ name: "" }} onSubmit={onSubmit} validationMode="onSubmit">
+        <form.Form defaultValues={{ name: "" }} onSubmit={onSubmit}>
           <form.name />
         </form.Form>,
       )
