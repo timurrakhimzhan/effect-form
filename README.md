@@ -1,6 +1,6 @@
 # @lucas-barake/effect-form
 
-Type-safe form state management powered by Effect Schema.
+Type-safe forms powered by Effect Schema.
 
 ## Installation
 
@@ -8,11 +8,7 @@ Type-safe form state management powered by Effect Schema.
 pnpm add @lucas-barake/effect-form-react
 ```
 
-## Creating a Login Form
-
-Let's create a simple login form with email and password validation.
-
-We use `Form.empty` to start building, `.addField()` to add fields with Effect Schema validation, and `FormReact.build()` to create React components.
+## Basic Form
 
 ```tsx
 import { Form } from "@lucas-barake/effect-form"
@@ -34,45 +30,29 @@ const form = FormReact.build(loginForm, {
   fields: {
     email: ({ value, onChange, onBlur, error }) => (
       <div>
-        <input
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onBlur={onBlur}
-        />
+        <input value={value} onChange={(e) => onChange(e.target.value)} onBlur={onBlur} />
         {Option.isSome(error) && <span>{error.value}</span>}
       </div>
     ),
     password: ({ value, onChange, onBlur, error }) => (
       <div>
-        <input
-          type="password"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onBlur={onBlur}
-        />
+        <input type="password" value={value} onChange={(e) => onChange(e.target.value)} onBlur={onBlur} />
         {Option.isSome(error) && <span>{error.value}</span>}
       </div>
     ),
   },
 })
 
-const handleSubmit = form.submit((values) =>
-  Effect.log(`Login: ${values.email}`)
-)
+const handleSubmit = form.submit((values) => Effect.log(`Login: ${values.email}`))
 
 function LoginPage() {
   const { submit, isDirty } = form.useForm()
 
   return (
-    <form.Form
-      defaultValues={{ email: "", password: "" }}
-      onSubmit={handleSubmit}
-    >
+    <form.Form defaultValues={{ email: "", password: "" }} onSubmit={handleSubmit}>
       <form.email />
       <form.password />
-      <button onClick={submit} disabled={!isDirty}>
-        Login
-      </button>
+      <button onClick={submit} disabled={!isDirty}>Login</button>
     </form.Form>
   )
 }
@@ -80,101 +60,49 @@ function LoginPage() {
 
 ## Validation Modes
 
-By default, validation runs on submit. You can change this with the `validationMode` build option.
+```tsx
+// Default: validate on submit only
+FormReact.build(loginForm, { runtime, fields, mode: "onSubmit" })
+
+// Validate on blur
+FormReact.build(loginForm, { runtime, fields, mode: "onBlur" })
+
+// Validate on change (immediate)
+FormReact.build(loginForm, { runtime, fields, mode: "onChange" })
+```
+
+## Debounced Validation
 
 ```tsx
-const form = FormReact.build(loginForm, {
+FormReact.build(loginForm, {
   runtime,
-  fields: { email: EmailInput, password: PasswordInput },
-  validationMode: "onBlur", // "onSubmit" | "onBlur" | "onChange"
+  fields,
+  mode: { onChange: { debounce: "300 millis" } },
 })
 ```
 
-## Subscribing to Form State
-
-Use `form.Subscribe` for render-prop access to form state, or `form.useForm()` as a hook.
+## Auto-Submit
 
 ```tsx
-function LoginDialog({ onClose }) {
-  // onSubmit can access component scope (e.g., close dialog)
-  const handleSubmit = form.submit((values) =>
-    Effect.gen(function* () {
-      yield* saveUser(values)
-      onClose()
-    })
-  )
+// Auto-submit on change (debounced)
+FormReact.build(loginForm, {
+  runtime,
+  fields,
+  mode: { onChange: { debounce: "300 millis", autoSubmit: true } },
+})
 
-  return (
-    <form.Form defaultValues={{ email: "", password: "" }} onSubmit={handleSubmit}>
-      <form.email />
-      <form.password />
-
-      {/* Render-prop pattern */}
-      <form.Subscribe>
-        {({ isDirty, submitResult, submit }) => (
-          <button onClick={submit} disabled={!isDirty || submitResult.waiting}>
-            {submitResult.waiting ? "Saving..." : "Login"}
-          </button>
-        )}
-      </form.Subscribe>
-    </form.Form>
-  )
-}
+// Auto-submit on blur
+FormReact.build(loginForm, {
+  runtime,
+  fields,
+  mode: { onBlur: { autoSubmit: true } },
+})
 ```
-
-## Submission Result
-
-The `submitResult` object tracks the full submission lifecycle (validation + your submit handler). It's a `Result` from `@effect-atom/atom`:
-
-```tsx
-import * as Result from "@effect-atom/atom/Result"
-
-function SubmitButton() {
-  const { submit, submitResult } = form.useForm()
-
-  // Check if submitting (validation or handler running)
-  if (submitResult.waiting) {
-    return <button disabled>Submitting...</button>
-  }
-
-  // Check result state
-  if (Result.isSuccess(submitResult)) {
-    return <span>Submitted successfully!</span>
-  }
-
-  if (Result.isFailure(submitResult)) {
-    // Access error via submitResult.cause
-    return <span>Submission failed</span>
-  }
-
-  return <button onClick={submit}>Submit</button>
-}
-```
-
-## Resetting the Form
-
-Use `reset()` to restore the form to its initial values (the `defaultValues` passed on mount):
-
-```tsx
-function FormWithReset() {
-  const { submit, reset, isDirty } = form.useForm()
-
-  return (
-    <>
-      <button onClick={submit} disabled={!isDirty}>Submit</button>
-      <button onClick={reset} disabled={!isDirty}>Reset</button>
-    </>
-  )
-}
-```
-
-Reset also clears the `submitResult` back to its initial state.
 
 ## Cross-Field Validation
 
-Use `.refine()` to validate relationships between fields. The `ctx.error()` helper routes errors to specific fields.
-
-```ts
+```tsx
+// Sync refinement
 const signupForm = Form.empty
   .addField("password", Schema.String)
   .addField("confirmPassword", Schema.String)
@@ -183,12 +111,9 @@ const signupForm = Form.empty
       return ctx.error("confirmPassword", "Passwords must match")
     }
   })
-```
 
-For async validation, use `.refineEffect()`:
-
-```ts
-const signupForm = Form.empty
+// Async refinement
+const usernameForm = Form.empty
   .addField("username", Schema.String)
   .refineEffect((values, ctx) =>
     Effect.gen(function* () {
@@ -198,11 +123,24 @@ const signupForm = Form.empty
       }
     })
   )
+
+// Multiple errors from one refinement
+Form.empty
+  .addField("email", Schema.String)
+  .addField("password", Schema.String)
+  .refine((values, ctx) => {
+    const errors: Array<Schema.FilterIssue> = []
+    if (!values.email.includes("@")) {
+      errors.push({ path: ["email"], message: "Invalid email" })
+    }
+    if (values.password.length < 8) {
+      errors.push({ path: ["password"], message: "Too short" })
+    }
+    return errors.length > 0 ? errors : undefined
+  })
 ```
 
 ## Array Fields
-
-Use `.addArray()` with a nested form definition for dynamic lists.
 
 ```tsx
 const itemForm = Form.empty.addField("name", Schema.String)
@@ -224,7 +162,7 @@ function OrderPage() {
     <form.Form defaultValues={{ title: "", items: [] }} onSubmit={handleSubmit}>
       <form.title />
       <form.items>
-        {({ items, append, remove }) => (
+        {({ items, append, remove, swap, move }) => (
           <>
             {items.map((_, index) => (
               <form.items.Item key={index} index={index}>
@@ -245,30 +183,75 @@ function OrderPage() {
 }
 ```
 
-Array operations: `append`, `remove`, `swap`, `move`.
+## Form State
 
-## Reusing Field Groups
+```tsx
+function FormControls() {
+  const { submit, reset, isDirty, submitResult, values } = form.useForm()
 
-Use `.merge()` to compose forms from reusable field definitions.
+  return (
+    <>
+      <button onClick={submit} disabled={!isDirty || submitResult.waiting}>
+        {submitResult.waiting ? "Submitting..." : "Submit"}
+      </button>
+      <button onClick={reset} disabled={!isDirty}>Reset</button>
+    </>
+  )
+}
+```
 
-```ts
+## Subscribe Component
+
+```tsx
+<form.Subscribe>
+  {({ values, isDirty, submitResult, submit, reset }) => (
+    <button onClick={submit} disabled={!isDirty || submitResult.waiting}>
+      Submit
+    </button>
+  )}
+</form.Subscribe>
+```
+
+## Submit Result
+
+```tsx
+import * as Result from "@effect-atom/atom/Result"
+
+function SubmitStatus() {
+  const { submitResult } = form.useForm()
+
+  if (submitResult.waiting) return <span>Submitting...</span>
+  if (Result.isSuccess(submitResult)) return <span>Success!</span>
+  if (Result.isFailure(submitResult)) return <span>Failed</span>
+  return null
+}
+```
+
+## Form Atom
+
+```tsx
+import { useAtomValue } from "@effect-atom/atom-react"
+
+function SubmitCount() {
+  const state = useAtomValue(form.atom)
+  return <span>Submit count: {state.submitCount}</span>
+}
+```
+
+## Merge Form Builders
+
+```tsx
 const addressFields = Form.empty
   .addField("street", Schema.String)
   .addField("city", Schema.String)
-  .addField("zipCode", Schema.String)
 
 const userForm = Form.empty
   .addField("name", Schema.String)
   .merge(addressFields)
-
-const companyForm = Form.empty
-  .addField("companyName", Schema.String)
-  .merge(addressFields)
+// Results in: { name, street, city }
 ```
 
 ## Field Component Props
-
-Each field component receives:
 
 ```ts
 interface FieldComponentProps<S extends Schema.Schema.Any> {

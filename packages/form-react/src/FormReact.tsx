@@ -64,6 +64,29 @@ const parseMode = (mode: FormMode = "onSubmit"): ParsedMode => {
 }
 
 // ================================
+// Path Conversion
+// ================================
+
+/**
+ * Converts Schema error path to field path format.
+ * Schema path: ["items", 0, "name"] → Field path: "items[0].name"
+ */
+const schemaPathToFieldPath = (path: ReadonlyArray<PropertyKey>): string => {
+  if (path.length === 0) return ""
+
+  let result = String(path[0])
+  for (let i = 1; i < path.length; i++) {
+    const segment = path[i]
+    if (typeof segment === "number") {
+      result += `[${segment}]`
+    } else {
+      result += `.${String(segment)}`
+    }
+  }
+  return result
+}
+
+// ================================
 // Field Component Props
 // ================================
 
@@ -344,6 +367,7 @@ const useDebounced = <T extends (...args: ReadonlyArray<any>) => void>(
 const makeFieldComponent = <S extends Schema.Schema.Any>(
   fieldKey: string,
   fieldDef: Form.FieldDef<S>,
+  stateAtom: Atom.Writable<Form.FormState<any>, any>,
   crossFieldErrorsAtom: Atom.Writable<Map<string, string>, Map<string, string>>,
   parsedMode: ParsedMode,
   getOrCreateValidationAtom: (
@@ -368,6 +392,10 @@ const makeFieldComponent = <S extends Schema.Schema.Any>(
     const [isTouched, setTouched] = useAtom(touchedAtom)
     const crossFieldError = useAtomValue(crossFieldErrorAtom)
     const setCrossFieldErrors = useAtomSet(crossFieldErrorsAtom)
+    const submitCount = useAtomValue(React.useMemo(
+      () => Atom.readable((get) => get(stateAtom).submitCount),
+      [],
+    ))
 
     const validationAtom = React.useMemo(
       () => getOrCreateValidationAtom(fieldPath, fieldDef.schema),
@@ -423,13 +451,14 @@ const makeFieldComponent = <S extends Schema.Schema.Any>(
 
     const isDirty = !Equal.equals(value, initialValue)
     const isValidating = validationResult.waiting
+    const shouldShowError = isTouched || submitCount > 0
 
     return (
       <Component
         value={value}
         onChange={onChange}
         onBlur={onBlur}
-        error={isTouched ? validationError : Option.none<string>()}
+        error={shouldShowError ? validationError : Option.none<string>()}
         isTouched={isTouched}
         isValidating={isValidating}
         isDirty={isDirty}
@@ -584,6 +613,7 @@ const makeArrayFieldComponent = <TItemFields extends Form.FieldsRecord>(
       itemFieldComponents[itemKey] = makeFieldComponent(
         itemKey,
         itemDef,
+        stateAtom,
         crossFieldErrorsAtom,
         parsedMode,
         getOrCreateValidationAtom,
@@ -644,6 +674,7 @@ const makeFieldComponents = <TFields extends Form.FieldsRecord>(
       components[key] = makeFieldComponent(
         key,
         def,
+        stateAtom,
         crossFieldErrorsAtom,
         parsedMode,
         getOrCreateValidationAtom,
@@ -904,7 +935,7 @@ export const build = <TFields extends Form.FieldsRecord, R, ER = never>(
           const fieldErrors = new Map<string, string>()
           for (const issue of issues) {
             if (issue.path.length > 0) {
-              const fieldPath = String(issue.path[0])
+              const fieldPath = schemaPathToFieldPath(issue.path)
               if (!fieldErrors.has(fieldPath)) {
                 fieldErrors.set(fieldPath, issue.message)
               }
@@ -924,6 +955,7 @@ export const build = <TFields extends Form.FieldsRecord, R, ER = never>(
       setFormState((prev: Form.FormState<any>) => ({
         ...prev,
         touched: Form.createTouchedRecord(fields, true) as { readonly [K in keyof TFields]: boolean },
+        submitCount: prev.submitCount + 1,
       }))
 
       callDecodeAndSubmit(formValues)

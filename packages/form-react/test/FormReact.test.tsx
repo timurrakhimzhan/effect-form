@@ -992,6 +992,76 @@ describe("FormReact.build", () => {
         expect(screen.queryByTestId("confirm-error")).not.toBeInTheDocument()
       })
     })
+
+    it("routes cross-field errors to nested array item fields", async () => {
+      const user = userEvent.setup()
+
+      const ItemNameInput: React.FC<FormReact.FieldComponentProps<typeof Schema.String>> = ({
+        error,
+        onBlur,
+        onChange,
+        value,
+      }) => (
+        <div>
+          <input
+            type="text"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onBlur={onBlur}
+            data-testid="item-name"
+          />
+          {Option.isSome(error) && <span data-testid="item-name-error">{error.value}</span>}
+        </div>
+      )
+
+      const ItemSchema = Schema.Struct({
+        name: Schema.String.pipe(Schema.minLength(3, { message: () => "Name must be at least 3 characters" })),
+      })
+
+      const formBuilder = Form.empty.addArray(
+        "items",
+        Form.empty.addField("name", ItemSchema.fields.name),
+      )
+
+      const runtime = createRuntime()
+      const form = FormReact.build(formBuilder, {
+        runtime,
+        fields: { items: { name: ItemNameInput } },
+      })
+
+      const onSubmit = form.submit(() => Effect.void)
+
+      const SubmitButton = () => {
+        const { submit } = form.useForm()
+        return <button onClick={submit} data-testid="submit">Submit</button>
+      }
+
+      render(
+        <form.Form defaultValues={{ items: [{ name: "AB" }] }} onSubmit={onSubmit}>
+          <form.items>
+            {({ items }) => (
+              <>
+                {items.map((_, i) => (
+                  <form.items.Item key={i} index={i}>
+                    <form.items.name />
+                  </form.items.Item>
+                ))}
+              </>
+            )}
+          </form.items>
+          <SubmitButton />
+        </form.Form>,
+      )
+
+      await user.click(screen.getByTestId("submit"))
+
+      // The error should appear on the nested array item field, not on the parent
+      await waitFor(() => {
+        expect(screen.getByTestId("item-name-error")).toHaveTextContent(
+          "Name must be at least 3 characters",
+        )
+      })
+    })
   })
 
   describe("validation modes", () => {
@@ -1562,7 +1632,7 @@ describe("FormReact.build", () => {
       await user.click(screen.getByTestId("submit"))
 
       await waitFor(() => {
-        expect(screen.getByTestId("submit-count")).toHaveTextContent("0")
+        expect(screen.getByTestId("submit-count")).toHaveTextContent("1")
       })
     })
   })
