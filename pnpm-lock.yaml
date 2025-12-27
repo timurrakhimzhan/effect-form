@@ -128,6 +128,9 @@ importers:
 
   packages/form:
     dependencies:
+      '@effect-atom/atom':
+        specifier: ^0.4.8
+        version: 0.4.11(@effect/experimental@0.57.11(@effect/platform@0.93.8(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.93.8(effect@3.19.13))(@effect/rpc@0.72.2(@effect/platform@0.93.8(effect@3.19.13))(effect@3.19.13))(effect@3.19.13)
       effect:
         specifier: ^3.19.0
         version: 3.19.13

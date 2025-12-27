@@ -6,7 +6,7 @@ export * as Form from "./Form.js"
 /**
  * @since 1.0.0
  */
-export * as FormState from "./FormState.js"
+export * as FormAtoms from "./FormAtoms.js"
 
 /**
  * @since 1.0.0

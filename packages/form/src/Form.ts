@@ -5,10 +5,6 @@ import type * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 
-// ================================
-// TypeId
-// ================================
-
 /**
  * Unique identifier for FormBuilder instances.
  *
@@ -63,10 +59,6 @@ export const makeFieldRef = <S>(key: string): Field<S> => ({
   _S: undefined as any,
   key,
 })
-
-// ================================
-// Field Definition Types
-// ================================
 
 /**
  * A scalar field definition containing the key and schema.
@@ -151,10 +143,6 @@ export const makeArrayField = <K extends string, TItemFields extends FieldsRecor
  */
 export type FieldsRecord = Record<string, AnyFieldDef>
 
-// ================================
-// Type Extraction Helpers
-// ================================
-
 /**
  * Extracts the encoded (input) type from a fields record.
  *
@@ -179,10 +167,6 @@ export type DecodedFromFields<T extends FieldsRecord> = {
     : never
 }
 
-// ================================
-// Form State
-// ================================
-
 /**
  * The state of a form at runtime.
  *
@@ -196,10 +180,6 @@ export interface FormState<TFields extends FieldsRecord> {
   readonly submitCount: number
   readonly dirtyFields: ReadonlySet<string>
 }
-
-// ================================
-// Refinement Types
-// ================================
 
 /**
  * Context passed to refinement predicates for type-safe error creation.
@@ -231,10 +211,6 @@ interface AsyncRefinement {
 }
 
 type Refinement = SyncRefinement | AsyncRefinement
-
-// ================================
-// FormBuilder Interface
-// ================================
 
 /**
  * A builder for constructing type-safe forms with Effect Schema validation.
@@ -350,10 +326,6 @@ export interface FormBuilder<TFields extends FieldsRecord, R> {
   ): FormBuilder<TFields, R | RD>
 }
 
-// ================================
-// FormBuilder Prototype
-// ================================
-
 const FormBuilderProto = {
   [TypeId]: TypeId,
   addField<TFields extends FieldsRecord, R>(
@@ -412,10 +384,6 @@ const FormBuilderProto = {
   },
 }
 
-// ================================
-// Type Guards
-// ================================
-
 /**
  * Checks if a value is a `FormBuilder`.
  *
@@ -453,10 +421,6 @@ export const isArrayFieldDef = (def: AnyFieldDef): def is ArrayFieldDef<string, 
  */
 export const isFieldDef = (def: AnyFieldDef): def is FieldDef<string, Schema.Schema.Any> => def._tag === "field"
 
-// ================================
-// Constructors
-// ================================
-
 /**
  * An empty `FormBuilder` to start building a form.
  *
@@ -488,10 +452,6 @@ export const empty: FormBuilder<{}, never> = (() => {
   self.refinements = []
   return self
 })()
-
-// ================================
-// Schema Building
-// ================================
 
 /**
  * Builds a combined Schema from a FormBuilder's field definitions.
@@ -531,10 +491,6 @@ export const buildSchema = <TFields extends FieldsRecord, R>(
     R
   >
 }
-
-// ================================
-// Helpers
-// ================================
 
 /**
  * Gets default encoded values for a fields record.
