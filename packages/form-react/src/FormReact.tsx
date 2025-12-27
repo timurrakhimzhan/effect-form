@@ -5,9 +5,16 @@ import { RegistryContext, useAtom, useAtomSet, useAtomSubscribe, useAtomValue } 
 import * as Atom from "@effect-atom/atom/Atom"
 import type * as Registry from "@effect-atom/atom/Registry"
 import type * as Result from "@effect-atom/atom/Result"
-import { Form } from "@lucas-barake/effect-form"
+import { Form, Mode, Validation } from "@lucas-barake/effect-form"
+import { recalculateDirtyFieldsForArray, recalculateDirtySubtree } from "@lucas-barake/effect-form/internal/dirty"
+import {
+  getNestedValue,
+  isPathOrParentDirty,
+  schemaPathToFieldPath,
+  setNestedValue,
+} from "@lucas-barake/effect-form/internal/path"
+import { createWeakRegistry } from "@lucas-barake/effect-form/internal/weak-registry"
 import * as Cause from "effect/Cause"
-import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Equal from "effect/Equal"
 import { pipe } from "effect/Function"
@@ -17,170 +24,7 @@ import * as Schema from "effect/Schema"
 import * as Utils from "effect/Utils"
 import * as React from "react"
 import { createContext, useContext } from "react"
-
-// ================================
-// Form Mode
-// ================================
-
-/**
- * Controls when field validation is triggered and whether form auto-submits.
- *
- * Simple modes (string):
- * - `"onSubmit"`: Validation only runs when the form is submitted (default)
- * - `"onBlur"`: Validation runs when a field loses focus
- * - `"onChange"`: Validation runs on every value change (sync)
- *
- * Object modes (with options):
- * - `{ onChange: { debounce, autoSubmit? } }`: Debounced validation, optional auto-submit
- * - `{ onBlur: { autoSubmit: true } }`: Validate on blur, auto-submit when valid
- *
- * @since 1.0.0
- * @category Models
- */
-export type FormMode =
-  | "onSubmit"
-  | "onBlur"
-  | "onChange"
-  | { readonly onChange: { readonly debounce: Duration.DurationInput; readonly autoSubmit?: false } }
-  | { readonly onBlur: { readonly autoSubmit: true } }
-  | { readonly onChange: { readonly debounce: Duration.DurationInput; readonly autoSubmit: true } }
-
-interface ParsedMode {
-  readonly validation: "onSubmit" | "onBlur" | "onChange"
-  readonly debounce: number | null
-  readonly autoSubmit: boolean
-}
-
-const parseMode = (mode: FormMode = "onSubmit"): ParsedMode => {
-  if (typeof mode === "string") {
-    return { validation: mode, debounce: null, autoSubmit: false }
-  }
-  if ("onBlur" in mode) {
-    return { validation: "onBlur", debounce: null, autoSubmit: true }
-  }
-  const debounceMs = Duration.toMillis(mode.onChange.debounce)
-  const autoSubmit = mode.onChange.autoSubmit === true
-  return { validation: "onChange", debounce: debounceMs, autoSubmit }
-}
-
-// ================================
-// Path Conversion
-// ================================
-
-const schemaPathToFieldPath = (path: ReadonlyArray<PropertyKey>): string => {
-  if (path.length === 0) return ""
-
-  let result = String(path[0])
-  for (let i = 1; i < path.length; i++) {
-    const segment = path[i]
-    if (typeof segment === "number") {
-      result += `[${segment}]`
-    } else {
-      result += `.${String(segment)}`
-    }
-  }
-  return result
-}
-
-// ================================
-// Dirty Field Helpers
-// ================================
-
-const isPathOrParentDirty = (dirtyFields: ReadonlySet<string>, path: string): boolean => {
-  if (dirtyFields.has(path)) return true
-
-  let parent = path
-  while (true) {
-    const lastDot = parent.lastIndexOf(".")
-    const lastBracket = parent.lastIndexOf("[")
-    const splitIndex = Math.max(lastDot, lastBracket)
-
-    if (splitIndex === -1) break
-
-    parent = parent.substring(0, splitIndex)
-    if (dirtyFields.has(parent)) return true
-  }
-
-  return false
-}
-
-const recalculateDirtyFieldsForArray = (
-  dirtyFields: ReadonlySet<string>,
-  initialValues: unknown,
-  arrayPath: string,
-  newItems: ReadonlyArray<unknown>,
-): ReadonlySet<string> => {
-  const nextDirty = new Set(
-    Array.from(dirtyFields).filter(
-      (path) => path !== arrayPath && !path.startsWith(arrayPath + ".") && !path.startsWith(arrayPath + "["),
-    ),
-  )
-
-  const initialItems = (getNestedValue(initialValues, arrayPath) ?? []) as ReadonlyArray<unknown>
-
-  const loopLength = Math.max(newItems.length, initialItems.length)
-  for (let i = 0; i < loopLength; i++) {
-    const itemPath = `${arrayPath}[${i}]`
-    const newItem = newItems[i]
-    const initialItem = initialItems[i]
-
-    const isEqual = Utils.structuralRegion(() => Equal.equals(newItem, initialItem))
-    if (!isEqual) {
-      nextDirty.add(itemPath)
-    }
-  }
-
-  if (newItems.length !== initialItems.length) {
-    nextDirty.add(arrayPath)
-  } else {
-    nextDirty.delete(arrayPath)
-  }
-
-  return nextDirty
-}
-
-const recalculateDirtySubtree = (
-  currentDirty: ReadonlySet<string>,
-  allInitial: unknown,
-  allValues: unknown,
-  rootPath: string = "",
-): ReadonlySet<string> => {
-  const nextDirty = new Set(currentDirty)
-
-  if (rootPath === "") {
-    nextDirty.clear()
-  } else {
-    for (const path of nextDirty) {
-      if (path === rootPath || path.startsWith(rootPath + ".") || path.startsWith(rootPath + "[")) {
-        nextDirty.delete(path)
-      }
-    }
-  }
-
-  const targetValue = rootPath ? getNestedValue(allValues, rootPath) : allValues
-  const targetInitial = rootPath ? getNestedValue(allInitial, rootPath) : allInitial
-
-  const recurse = (current: unknown, initial: unknown, path: string): void => {
-    if (Array.isArray(current)) {
-      const initialArr = (initial ?? []) as ReadonlyArray<unknown>
-      for (let i = 0; i < Math.max(current.length, initialArr.length); i++) {
-        recurse(current[i], initialArr[i], path ? `${path}[${i}]` : `[${i}]`)
-      }
-    } else if (current !== null && typeof current === "object") {
-      const initialObj = (initial ?? {}) as Record<string, unknown>
-      const allKeys = new Set([...Object.keys(current as object), ...Object.keys(initialObj)])
-      for (const key of allKeys) {
-        recurse((current as Record<string, unknown>)[key], initialObj[key], path ? `${path}.${key}` : key)
-      }
-    } else {
-      const isEqual = Utils.structuralRegion(() => Equal.equals(current, initial))
-      if (!isEqual && path) nextDirty.add(path)
-    }
-  }
-
-  recurse(targetValue, targetInitial, rootPath)
-  return nextDirty
-}
+import { useDebounced } from "./internal/use-debounced.js"
 
 // ================================
 // Field Component Props
@@ -346,52 +190,8 @@ interface FieldAtoms {
 }
 
 // ================================
-// Weak Registry (auto-cleanup via FinalizationRegistry)
+// Internal Contexts
 // ================================
-
-interface WeakRegistry<V extends object> {
-  readonly get: (key: string) => V | undefined
-  readonly set: (key: string, value: V) => void
-  readonly delete: (key: string) => boolean
-  readonly clear: () => void
-  readonly values: () => IterableIterator<V>
-}
-
-const createWeakRegistry = <V extends object>(): WeakRegistry<V> => {
-  if (typeof WeakRef === "undefined" || typeof FinalizationRegistry === "undefined") {
-    const map = new Map<string, V>()
-    return {
-      get: (key) => map.get(key),
-      set: (key, value) => {
-        map.set(key, value)
-      },
-      delete: (key) => map.delete(key),
-      clear: () => map.clear(),
-      values: () => map.values(),
-    }
-  }
-
-  const map = new Map<string, WeakRef<V>>()
-  const registry = new FinalizationRegistry<string>((key) => {
-    map.delete(key)
-  })
-
-  return {
-    get: (key) => map.get(key)?.deref(),
-    set: (key, value) => {
-      map.set(key, new WeakRef(value))
-      registry.register(value, key)
-    },
-    delete: (key) => map.delete(key),
-    clear: () => map.clear(),
-    *values() {
-      for (const ref of map.values()) {
-        const value = ref.deref()
-        if (value !== undefined) yield value
-      }
-    },
-  }
-}
 
 interface ArrayItemContextValue {
   readonly index: number
@@ -400,85 +200,6 @@ interface ArrayItemContextValue {
 
 const ArrayItemContext = createContext<ArrayItemContextValue | null>(null)
 const AutoSubmitContext = createContext<(() => void) | null>(null)
-
-// ================================
-// Utilities
-// ================================
-
-const getNestedValue = (obj: unknown, path: string): unknown => {
-  const parts = path.replace(/\[(\d+)\]/g, ".$1").split(".")
-  let current: any = obj
-  for (const part of parts) {
-    if (current == null) return undefined
-    current = current[part]
-  }
-  return current
-}
-
-const setNestedValue = <T,>(obj: T, path: string, value: unknown): T => {
-  const parts = path.replace(/\[(\d+)\]/g, ".$1").split(".")
-  const result = { ...obj } as any
-
-  let current = result
-  for (let i = 0; i < parts.length - 1; i++) {
-    const part = parts[i]
-    if (Array.isArray(current[part])) {
-      current[part] = [...current[part]]
-    } else {
-      current[part] = { ...current[part] }
-    }
-    current = current[part]
-  }
-
-  current[parts[parts.length - 1]] = value
-  return result
-}
-
-const extractFirstError = (error: ParseResult.ParseError): Option.Option<string> => {
-  const issues = ParseResult.ArrayFormatter.formatErrorSync(error)
-  if (issues.length === 0) {
-    return Option.none()
-  }
-  return Option.some(issues[0].message)
-}
-
-const useDebounced = <T extends (...args: ReadonlyArray<any>) => void>(
-  fn: T,
-  delayMs: number | null,
-): T => {
-  const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
-  const fnRef = React.useRef(fn)
-
-  React.useEffect(() => {
-    fnRef.current = fn
-  })
-
-  React.useEffect(() => {
-    return () => {
-      if (timeoutRef.current !== null) {
-        clearTimeout(timeoutRef.current)
-      }
-    }
-  }, [])
-
-  return React.useMemo(
-    () =>
-      ((...args: Parameters<T>) => {
-        if (delayMs === null || delayMs === 0) {
-          fnRef.current(...args)
-          return
-        }
-        if (timeoutRef.current !== null) {
-          clearTimeout(timeoutRef.current)
-        }
-        timeoutRef.current = setTimeout(() => {
-          fnRef.current(...args)
-          timeoutRef.current = null
-        }, delayMs)
-      }) as T,
-    [delayMs],
-  )
-}
 
 // ================================
 // Field Component Factory
@@ -490,7 +211,7 @@ const makeFieldComponent = <S extends Schema.Schema.Any>(
   crossFieldErrorsAtom: Atom.Writable<Map<string, string>, Map<string, string>>,
   submitCountAtom: Atom.Atom<number>,
   dirtyFieldsAtom: Atom.Atom<ReadonlySet<string>>,
-  parsedMode: ParsedMode,
+  parsedMode: Mode.ParsedMode,
   getOrCreateValidationAtom: (
     fieldPath: string,
     schema: Schema.Schema.Any,
@@ -547,7 +268,7 @@ const makeFieldComponent = <S extends Schema.Schema.Any>(
       if (validationResult._tag === "Failure") {
         const parseError = Cause.failureOption(validationResult.cause)
         if (Option.isSome(parseError) && ParseResult.isParseError(parseError.value)) {
-          return extractFirstError(parseError.value)
+          return Validation.extractFirstError(parseError.value)
         }
       }
       return Option.none()
@@ -616,7 +337,7 @@ const makeArrayFieldComponent = <TItemFields extends Form.FieldsRecord>(
   crossFieldErrorsAtom: Atom.Writable<Map<string, string>, Map<string, string>>,
   submitCountAtom: Atom.Atom<number>,
   dirtyFieldsAtom: Atom.Atom<ReadonlySet<string>>,
-  parsedMode: ParsedMode,
+  parsedMode: Mode.ParsedMode,
   getOrCreateValidationAtom: (
     fieldPath: string,
     schema: Schema.Schema.Any,
@@ -798,7 +519,7 @@ const makeFieldComponents = <TFields extends Form.FieldsRecord>(
   crossFieldErrorsAtom: Atom.Writable<Map<string, string>, Map<string, string>>,
   submitCountAtom: Atom.Atom<number>,
   dirtyFieldsAtom: Atom.Atom<ReadonlySet<string>>,
-  parsedMode: ParsedMode,
+  parsedMode: Mode.ParsedMode,
   getOrCreateValidationAtom: (
     fieldPath: string,
     schema: Schema.Schema.Any,
@@ -899,11 +620,11 @@ export const build = <TFields extends Form.FieldsRecord, R, ER = never>(
   options: {
     readonly runtime: Atom.AtomRuntime<R, ER>
     readonly fields: FieldComponentMap<TFields>
-    readonly mode?: FormMode
+    readonly mode?: Mode.FormMode
   },
 ): BuiltForm<TFields, R> => {
   const { fields: components, mode, runtime } = options
-  const parsedMode = parseMode(mode)
+  const parsedMode = Mode.parse(mode)
   const { fields } = self
 
   const combinedSchema = Form.buildSchema(self)

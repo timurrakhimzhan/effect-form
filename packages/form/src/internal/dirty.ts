@@ -1,0 +1,96 @@
+/**
+ * Internal dirty tracking algorithms.
+ *
+ * @internal
+ */
+import * as Equal from "effect/Equal"
+import * as Utils from "effect/Utils"
+import { getNestedValue } from "./path.js"
+
+/**
+ * Recalculates dirty fields for an array after mutation.
+ * Clears all paths under the array and re-evaluates each item.
+ */
+export const recalculateDirtyFieldsForArray = (
+  dirtyFields: ReadonlySet<string>,
+  initialValues: unknown,
+  arrayPath: string,
+  newItems: ReadonlyArray<unknown>,
+): ReadonlySet<string> => {
+  const nextDirty = new Set(
+    Array.from(dirtyFields).filter(
+      (path) => path !== arrayPath && !path.startsWith(arrayPath + ".") && !path.startsWith(arrayPath + "["),
+    ),
+  )
+
+  const initialItems = (getNestedValue(initialValues, arrayPath) ?? []) as ReadonlyArray<unknown>
+
+  const loopLength = Math.max(newItems.length, initialItems.length)
+  for (let i = 0; i < loopLength; i++) {
+    const itemPath = `${arrayPath}[${i}]`
+    const newItem = newItems[i]
+    const initialItem = initialItems[i]
+
+    const isEqual = Utils.structuralRegion(() => Equal.equals(newItem, initialItem))
+    if (!isEqual) {
+      nextDirty.add(itemPath)
+    }
+  }
+
+  if (newItems.length !== initialItems.length) {
+    nextDirty.add(arrayPath)
+  } else {
+    nextDirty.delete(arrayPath)
+  }
+
+  return nextDirty
+}
+
+/**
+ * Recalculates dirty fields for a subtree after value change.
+ * Clears the rootPath and all children, then re-evaluates recursively.
+ *
+ * @param rootPath - Empty string for full form, or a specific path for targeted update
+ */
+export const recalculateDirtySubtree = (
+  currentDirty: ReadonlySet<string>,
+  allInitial: unknown,
+  allValues: unknown,
+  rootPath: string = "",
+): ReadonlySet<string> => {
+  const nextDirty = new Set(currentDirty)
+
+  if (rootPath === "") {
+    nextDirty.clear()
+  } else {
+    for (const path of nextDirty) {
+      if (path === rootPath || path.startsWith(rootPath + ".") || path.startsWith(rootPath + "[")) {
+        nextDirty.delete(path)
+      }
+    }
+  }
+
+  const targetValue = rootPath ? getNestedValue(allValues, rootPath) : allValues
+  const targetInitial = rootPath ? getNestedValue(allInitial, rootPath) : allInitial
+
+  const recurse = (current: unknown, initial: unknown, path: string): void => {
+    if (Array.isArray(current)) {
+      const initialArr = (initial ?? []) as ReadonlyArray<unknown>
+      for (let i = 0; i < Math.max(current.length, initialArr.length); i++) {
+        recurse(current[i], initialArr[i], path ? `${path}[${i}]` : `[${i}]`)
+      }
+    } else if (current !== null && typeof current === "object") {
+      const initialObj = (initial ?? {}) as Record<string, unknown>
+      const allKeys = new Set([...Object.keys(current as object), ...Object.keys(initialObj)])
+      for (const key of allKeys) {
+        recurse((current as Record<string, unknown>)[key], initialObj[key], path ? `${path}.${key}` : key)
+      }
+    } else {
+      const isEqual = Utils.structuralRegion(() => Equal.equals(current, initial))
+      if (!isEqual && path) nextDirty.add(path)
+    }
+  }
+
+  recurse(targetValue, targetInitial, rootPath)
+  return nextDirty
+}
