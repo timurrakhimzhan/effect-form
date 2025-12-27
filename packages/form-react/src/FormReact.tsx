@@ -213,8 +213,8 @@ export interface FieldComponentProps<S extends Schema.Schema.Any> {
  * @category Models
  */
 export type FieldComponentMap<TFields extends Form.FieldsRecord> = {
-  readonly [K in keyof TFields]: TFields[K] extends Form.FieldDef<infer S> ? React.FC<FieldComponentProps<S>>
-    : TFields[K] extends Form.ArrayFieldDef<infer F> ? FieldComponentMap<F["fields"]>
+  readonly [K in keyof TFields]: TFields[K] extends Form.FieldDef<any, infer S> ? React.FC<FieldComponentProps<S>>
+    : TFields[K] extends Form.ArrayFieldDef<any, infer F> ? FieldComponentMap<F["fields"]>
     : never
 }
 
@@ -225,8 +225,9 @@ export type FieldComponentMap<TFields extends Form.FieldsRecord> = {
  * @category Models
  */
 export type FieldRefs<TFields extends Form.FieldsRecord> = {
-  readonly [K in keyof TFields]: TFields[K] extends Form.FieldDef<infer S> ? Form.Field<Schema.Schema.Encoded<S>>
-    : TFields[K] extends Form.ArrayFieldDef<infer F> ? Form.Field<ReadonlyArray<Form.EncodedFromFields<F["fields"]>>>
+  readonly [K in keyof TFields]: TFields[K] extends Form.FieldDef<any, infer S> ? Form.Field<Schema.Schema.Encoded<S>>
+    : TFields[K] extends Form.ArrayFieldDef<any, infer F>
+      ? Form.Field<ReadonlyArray<Form.EncodedFromFields<F["fields"]>>>
     : never
 }
 
@@ -310,8 +311,8 @@ export type BuiltForm<TFields extends Form.FieldsRecord, R> = {
 } & FieldComponents<TFields>
 
 type FieldComponents<TFields extends Form.FieldsRecord> = {
-  readonly [K in keyof TFields]: TFields[K] extends Form.FieldDef<any> ? React.FC
-    : TFields[K] extends Form.ArrayFieldDef<infer F>
+  readonly [K in keyof TFields]: TFields[K] extends Form.FieldDef<any, any> ? React.FC
+    : TFields[K] extends Form.ArrayFieldDef<any, infer F>
       ? ArrayFieldComponent<F extends Form.FormBuilder<infer IF, any> ? IF : never>
     : never
 }
@@ -327,8 +328,8 @@ type ArrayFieldComponent<TItemFields extends Form.FieldsRecord> =
     }>
   }
   & {
-    readonly [K in keyof TItemFields]: TItemFields[K] extends Form.FieldDef<any> ? React.FC
-      : TItemFields[K] extends Form.ArrayFieldDef<infer F>
+    readonly [K in keyof TItemFields]: TItemFields[K] extends Form.FieldDef<any, any> ? React.FC
+      : TItemFields[K] extends Form.ArrayFieldDef<any, infer F>
         ? ArrayFieldComponent<F extends Form.FormBuilder<infer IF, any> ? IF : never>
       : never
   }
@@ -485,7 +486,7 @@ const useDebounced = <T extends (...args: ReadonlyArray<any>) => void>(
 
 const makeFieldComponent = <S extends Schema.Schema.Any>(
   fieldKey: string,
-  fieldDef: Form.FieldDef<S>,
+  fieldDef: Form.FieldDef<string, S>,
   crossFieldErrorsAtom: Atom.Writable<Map<string, string>, Map<string, string>>,
   submitCountAtom: Atom.Atom<number>,
   dirtyFieldsAtom: Atom.Atom<ReadonlySet<string>>,
@@ -610,7 +611,7 @@ const makeFieldComponent = <S extends Schema.Schema.Any>(
 
 const makeArrayFieldComponent = <TItemFields extends Form.FieldsRecord>(
   fieldKey: string,
-  def: Form.ArrayFieldDef<Form.FormBuilder<TItemFields, any>>,
+  def: Form.ArrayFieldDef<string, Form.FormBuilder<TItemFields, any>>,
   stateAtom: Atom.Writable<Option.Option<Form.FormState<any>>, Option.Option<Form.FormState<any>>>,
   crossFieldErrorsAtom: Atom.Writable<Map<string, string>, Map<string, string>>,
   submitCountAtom: Atom.Atom<number>,

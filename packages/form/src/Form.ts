@@ -28,12 +28,14 @@ export type TypeId = typeof TypeId
  *
  * @since 1.0.0
  * @category Symbols
+ * @internal
  */
 export const FieldTypeId: unique symbol = Symbol.for("@lucas-barake/effect-form/Field")
 
 /**
  * @since 1.0.0
  * @category Symbols
+ * @internal
  */
 export type FieldTypeId = typeof FieldTypeId
 
@@ -54,6 +56,7 @@ export interface Field<S> {
  *
  * @since 1.0.0
  * @category Constructors
+ * @internal
  */
 export const makeFieldRef = <S>(key: string): Field<S> => ({
   [FieldTypeId]: FieldTypeId,
@@ -66,13 +69,14 @@ export const makeFieldRef = <S>(key: string): Field<S> => ({
 // ================================
 
 /**
- * A field definition containing only the schema.
+ * A scalar field definition containing the key and schema.
  *
  * @since 1.0.0
  * @category Models
  */
-export interface FieldDef<S extends Schema.Schema.Any> {
+export interface FieldDef<K extends string, S extends Schema.Schema.Any> {
   readonly _tag: "field"
+  readonly key: K
   readonly schema: S
 }
 
@@ -82,8 +86,9 @@ export interface FieldDef<S extends Schema.Schema.Any> {
  * @since 1.0.0
  * @category Models
  */
-export interface ArrayFieldDef<TItemForm extends FormBuilder<any, any>> {
+export interface ArrayFieldDef<K extends string, TItemForm extends FormBuilder<any, any>> {
   readonly _tag: "array"
+  readonly key: K
   readonly itemForm: TItemForm
 }
 
@@ -93,7 +98,50 @@ export interface ArrayFieldDef<TItemForm extends FormBuilder<any, any>> {
  * @since 1.0.0
  * @category Models
  */
-export type AnyFieldDef = FieldDef<Schema.Schema.Any> | ArrayFieldDef<any>
+export type AnyFieldDef = FieldDef<string, Schema.Schema.Any> | ArrayFieldDef<string, any>
+
+/**
+ * Creates a scalar field definition.
+ *
+ * @example
+ * ```ts
+ * const NameField = Form.makeField("name", Schema.String)
+ * const form = Form.empty.addField(NameField)
+ * ```
+ *
+ * @since 1.0.0
+ * @category Constructors
+ */
+export const makeField = <K extends string, S extends Schema.Schema.Any>(
+  key: K,
+  schema: S,
+): FieldDef<K, S> => ({
+  _tag: "field",
+  key,
+  schema,
+})
+
+/**
+ * Creates an array field definition.
+ *
+ * @example
+ * ```ts
+ * const itemForm = Form.empty.addField(Form.makeField("name", Schema.String))
+ * const ItemsField = Form.makeArrayField("items", itemForm)
+ * const form = Form.empty.addField(ItemsField)
+ * ```
+ *
+ * @since 1.0.0
+ * @category Constructors
+ */
+export const makeArrayField = <K extends string, TItemFields extends FieldsRecord, IR>(
+  key: K,
+  itemForm: FormBuilder<TItemFields, IR>,
+): ArrayFieldDef<K, FormBuilder<TItemFields, IR>> => ({
+  _tag: "array",
+  key,
+  itemForm,
+})
 
 /**
  * A record of field definitions.
@@ -114,8 +162,8 @@ export type FieldsRecord = Record<string, AnyFieldDef>
  * @category Type Helpers
  */
 export type EncodedFromFields<T extends FieldsRecord> = {
-  readonly [K in keyof T]: T[K] extends FieldDef<infer S> ? Schema.Schema.Encoded<S>
-    : T[K] extends ArrayFieldDef<infer F> ? ReadonlyArray<EncodedFromFields<F["fields"]>>
+  readonly [K in keyof T]: T[K] extends FieldDef<any, infer S> ? Schema.Schema.Encoded<S>
+    : T[K] extends ArrayFieldDef<any, infer F> ? ReadonlyArray<EncodedFromFields<F["fields"]>>
     : never
 }
 
@@ -126,8 +174,8 @@ export type EncodedFromFields<T extends FieldsRecord> = {
  * @category Type Helpers
  */
 export type DecodedFromFields<T extends FieldsRecord> = {
-  readonly [K in keyof T]: T[K] extends FieldDef<infer S> ? Schema.Schema.Type<S>
-    : T[K] extends ArrayFieldDef<infer F> ? ReadonlyArray<DecodedFromFields<F["fields"]>>
+  readonly [K in keyof T]: T[K] extends FieldDef<any, infer S> ? Schema.Schema.Type<S>
+    : T[K] extends ArrayFieldDef<any, infer F> ? ReadonlyArray<DecodedFromFields<F["fields"]>>
     : never
 }
 
@@ -207,38 +255,33 @@ export interface FormBuilder<TFields extends FieldsRecord, R> {
   readonly _R?: R
 
   /**
-   * Adds a field to the form builder.
+   * Adds a scalar field to the form builder.
    *
    * @example
    * ```ts
-   * const form = Form.empty
-   *   .addField("email", Schema.String)
-   *   .addField("password", Schema.String)
+   * const NameField = Form.makeField("name", Schema.String)
+   * const form = Form.empty.addField(NameField)
    * ```
    */
   addField<K extends string, S extends Schema.Schema.Any>(
     this: FormBuilder<TFields, R>,
-    name: K,
-    schema: S,
-  ): FormBuilder<TFields & { readonly [key in K]: FieldDef<S> }, R | Schema.Schema.Context<S>>
+    field: FieldDef<K, S>,
+  ): FormBuilder<TFields & { readonly [key in K]: FieldDef<K, S> }, R | Schema.Schema.Context<S>>
 
   /**
-   * Adds an array field to the form for managing lists of items.
+   * Adds an array field to the form builder.
    *
    * @example
    * ```ts
-   * const itemForm = Form.empty.addField("name", Schema.String)
-   *
-   * const form = Form.empty
-   *   .addField("title", Schema.String)
-   *   .addArray("items", itemForm)
+   * const itemForm = Form.empty.addField(Form.makeField("name", Schema.String))
+   * const ItemsField = Form.makeArrayField("items", itemForm)
+   * const form = Form.empty.addField(ItemsField)
    * ```
    */
-  addArray<K extends string, TItemFields extends FieldsRecord, IR>(
+  addField<K extends string, TItemFields extends FieldsRecord, IR>(
     this: FormBuilder<TFields, R>,
-    name: K,
-    itemForm: FormBuilder<TItemFields, IR>,
-  ): FormBuilder<TFields & { readonly [key in K]: ArrayFieldDef<FormBuilder<TItemFields, IR>> }, R | IR>
+    field: ArrayFieldDef<K, FormBuilder<TItemFields, IR>>,
+  ): FormBuilder<TFields & { readonly [key in K]: ArrayFieldDef<K, FormBuilder<TItemFields, IR>> }, R | IR>
 
   /**
    * Merges another FormBuilder's fields into this one.
@@ -313,23 +356,12 @@ export interface FormBuilder<TFields extends FieldsRecord, R> {
 
 const FormBuilderProto = {
   [TypeId]: TypeId,
-  addField<TFields extends FieldsRecord, R, K extends string, S extends Schema.Schema.Any>(
+  addField<TFields extends FieldsRecord, R>(
     this: FormBuilder<TFields, R>,
-    name: K,
-    schema: S,
-  ): FormBuilder<TFields & { readonly [key in K]: FieldDef<S> }, R | Schema.Schema.Context<S>> {
+    field: AnyFieldDef,
+  ): FormBuilder<any, any> {
     const newSelf = Object.create(FormBuilderProto)
-    newSelf.fields = { ...this.fields, [name]: { _tag: "field" as const, schema } }
-    newSelf.refinements = this.refinements
-    return newSelf
-  },
-  addArray<TFields extends FieldsRecord, R, K extends string, TItemFields extends FieldsRecord, IR>(
-    this: FormBuilder<TFields, R>,
-    name: K,
-    itemForm: FormBuilder<TItemFields, IR>,
-  ): FormBuilder<TFields & { readonly [key in K]: ArrayFieldDef<FormBuilder<TItemFields, IR>> }, R | IR> {
-    const newSelf = Object.create(FormBuilderProto)
-    newSelf.fields = { ...this.fields, [name]: { _tag: "array" as const, itemForm } }
+    newSelf.fields = { ...this.fields, [field.key]: field }
     newSelf.refinements = this.refinements
     return newSelf
   },
@@ -411,7 +443,7 @@ export const isFormBuilder = (u: unknown): u is FormBuilder<any, any> => Predica
  * @since 1.0.0
  * @category Guards
  */
-export const isArrayFieldDef = (def: AnyFieldDef): def is ArrayFieldDef<any> => def._tag === "array"
+export const isArrayFieldDef = (def: AnyFieldDef): def is ArrayFieldDef<string, any> => def._tag === "array"
 
 /**
  * Checks if a field definition is a simple field.
@@ -419,7 +451,7 @@ export const isArrayFieldDef = (def: AnyFieldDef): def is ArrayFieldDef<any> => 
  * @since 1.0.0
  * @category Guards
  */
-export const isFieldDef = (def: AnyFieldDef): def is FieldDef<Schema.Schema.Any> => def._tag === "field"
+export const isFieldDef = (def: AnyFieldDef): def is FieldDef<string, Schema.Schema.Any> => def._tag === "field"
 
 // ================================
 // Constructors
@@ -438,9 +470,12 @@ export const isFieldDef = (def: AnyFieldDef): def is FieldDef<Schema.Schema.Any>
  * import * as Form from "@lucas-barake/effect-form"
  * import * as Schema from "effect/Schema"
  *
+ * const EmailField = Form.makeField("email", Schema.String)
+ * const PasswordField = Form.makeField("password", Schema.String)
+ *
  * const loginForm = Form.empty
- *   .addField("email", Schema.String)
- *   .addField("password", Schema.String)
+ *   .addField(EmailField)
+ *   .addField(PasswordField)
  * ```
  *
  * @since 1.0.0

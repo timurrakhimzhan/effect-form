@@ -34,7 +34,7 @@ const TextInput: React.FC<FormReact.FieldComponentProps<typeof Schema.String>> =
 describe("FormReact.build", () => {
   describe("Form Component", () => {
     it("initializes with default values", () => {
-      const formBuilder = Form.empty.addField("name", Schema.String)
+      const formBuilder = Form.empty.addField(Form.makeField("name", Schema.String))
 
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
@@ -57,7 +57,7 @@ describe("FormReact.build", () => {
     it("updates value on change", async () => {
       const user = userEvent.setup()
 
-      const formBuilder = Form.empty.addField("name", Schema.String)
+      const formBuilder = Form.empty.addField(Form.makeField("name", Schema.String))
 
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
@@ -83,7 +83,7 @@ describe("FormReact.build", () => {
 
       const NonEmpty = Schema.String.pipe(Schema.minLength(1, { message: () => "Required" }))
 
-      const formBuilder = Form.empty.addField("name", NonEmpty)
+      const formBuilder = Form.empty.addField(Form.makeField("name", NonEmpty))
 
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
@@ -111,7 +111,7 @@ describe("FormReact.build", () => {
 
   describe("useForm hook", () => {
     it("returns isDirty = false when values match initial", () => {
-      const formBuilder = Form.empty.addField("name", Schema.String)
+      const formBuilder = Form.empty.addField(Form.makeField("name", Schema.String))
 
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
@@ -141,7 +141,7 @@ describe("FormReact.build", () => {
     it("returns isDirty = true when values differ from initial", async () => {
       const user = userEvent.setup()
 
-      const formBuilder = Form.empty.addField("name", Schema.String)
+      const formBuilder = Form.empty.addField(Form.makeField("name", Schema.String))
 
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
@@ -175,7 +175,7 @@ describe("FormReact.build", () => {
       const user = userEvent.setup()
       const submitHandler = vi.fn()
 
-      const formBuilder = Form.empty.addField("name", Schema.String)
+      const formBuilder = Form.empty.addField(Form.makeField("name", Schema.String))
 
       const runtime = createRuntime()
       const form = FormReact.build(formBuilder, {
@@ -209,7 +209,7 @@ describe("FormReact.build", () => {
     it("renders multiple fields correctly", async () => {
       const user = userEvent.setup()
 
-      const formBuilder = Form.empty.addField("firstName", Schema.String).addField("lastName", Schema.String)
+      const formBuilder = Form.empty.addField(Form.makeField("firstName", Schema.String)).addField(Form.makeField("lastName", Schema.String))
 
       const NamedInput: React.FC<FormReact.FieldComponentProps<typeof Schema.String> & { name: string }> = ({
         name,
@@ -263,9 +263,9 @@ describe("FormReact.build", () => {
     it("renders array field with items", async () => {
       const user = userEvent.setup()
 
-      const itemForm = Form.empty.addField("name", Schema.String)
+      const itemForm = Form.empty.addField(Form.makeField("name", Schema.String))
 
-      const formBuilder = Form.empty.addField("title", Schema.String).addArray("items", itemForm)
+      const formBuilder = Form.empty.addField(Form.makeField("title", Schema.String)).addField(Form.makeArrayField("items", itemForm))
 
       const TitleInput: React.FC<FormReact.FieldComponentProps<typeof Schema.String>> = ({
         onBlur,
@@ -341,8 +341,8 @@ describe("FormReact.build", () => {
     it("remove() removes item at specified index", async () => {
       const user = userEvent.setup()
 
-      const itemForm = Form.empty.addField("name", Schema.String)
-      const formBuilder = Form.empty.addArray("items", itemForm)
+      const itemForm = Form.empty.addField(Form.makeField("name", Schema.String))
+      const formBuilder = Form.empty.addField(Form.makeArrayField("items", itemForm))
 
       const ItemNameInput: React.FC<FormReact.FieldComponentProps<typeof Schema.String>> = ({
         onBlur,
@@ -408,8 +408,8 @@ describe("FormReact.build", () => {
     it("swap() exchanges items at two indices", async () => {
       const user = userEvent.setup()
 
-      const itemForm = Form.empty.addField("name", Schema.String)
-      const formBuilder = Form.empty.addArray("items", itemForm)
+      const itemForm = Form.empty.addField(Form.makeField("name", Schema.String))
+      const formBuilder = Form.empty.addField(Form.makeArrayField("items", itemForm))
 
       const ItemNameInput: React.FC<FormReact.FieldComponentProps<typeof Schema.String>> = ({
         onBlur,
@@ -472,8 +472,8 @@ describe("FormReact.build", () => {
     it("move() relocates item from one index to another", async () => {
       const user = userEvent.setup()
 
-      const itemForm = Form.empty.addField("name", Schema.String)
-      const formBuilder = Form.empty.addArray("items", itemForm)
+      const itemForm = Form.empty.addField(Form.makeField("name", Schema.String))
+      const formBuilder = Form.empty.addField(Form.makeArrayField("items", itemForm))
 
       const ItemNameInput: React.FC<FormReact.FieldComponentProps<typeof Schema.String>> = ({
         onBlur,
@@ -532,8 +532,8 @@ describe("FormReact.build", () => {
     it("Item render prop provides remove function", async () => {
       const user = userEvent.setup()
 
-      const itemForm = Form.empty.addField("name", Schema.String)
-      const formBuilder = Form.empty.addArray("items", itemForm)
+      const itemForm = Form.empty.addField(Form.makeField("name", Schema.String))
+      const formBuilder = Form.empty.addField(Form.makeArrayField("items", itemForm))
 
       const ItemNameInput: React.FC<FormReact.FieldComponentProps<typeof Schema.String>> = ({
         onBlur,
@@ -602,7 +602,7 @@ describe("FormReact.build", () => {
         Schema.filterEffect(() => Effect.succeed(true).pipe(Effect.delay("10 millis"))),
       )
 
-      const formBuilder = Form.empty.addField("email", AsyncEmail)
+      const formBuilder = Form.empty.addField(Form.makeField("email", AsyncEmail))
 
       const runtime = createRuntime()
       const form = FormReact.build(formBuilder, {
@@ -656,7 +656,7 @@ describe("FormReact.build", () => {
         </div>
       )
 
-      const formBuilder = Form.empty.addField("asyncField", AsyncField)
+      const formBuilder = Form.empty.addField(Form.makeField("asyncField", AsyncField))
 
       const runtime = createRuntime()
       const form = FormReact.build(formBuilder, {
@@ -729,7 +729,7 @@ describe("FormReact.build", () => {
         </div>
       )
 
-      const formBuilder = Form.empty.addField("password", Schema.String).addField("confirmPassword", Schema.String)
+      const formBuilder = Form.empty.addField(Form.makeField("password", Schema.String)).addField(Form.makeField("confirmPassword", Schema.String))
         .refine((values, ctx) => {
           if (values.password !== values.confirmPassword) {
             return ctx.error("confirmPassword", "Passwords must match")
@@ -792,7 +792,7 @@ describe("FormReact.build", () => {
       )
 
       const formBuilder = Form.empty
-        .addField("username", Schema.String)
+        .addField(Form.makeField("username", Schema.String))
         .refineEffect((values, ctx) =>
           Effect.gen(function*() {
             yield* Effect.sleep("20 millis")
@@ -859,8 +859,8 @@ describe("FormReact.build", () => {
       )
 
       const formBuilder = Form.empty
-        .addField("fieldA", Schema.String)
-        .addField("fieldB", Schema.String)
+        .addField(Form.makeField("fieldA", Schema.String))
+        .addField(Form.makeField("fieldB", Schema.String))
         .refine((values, ctx) => {
           if (values.fieldA === "error1") {
             return ctx.error("fieldA", "First validation failed")
@@ -948,8 +948,8 @@ describe("FormReact.build", () => {
       )
 
       const formBuilder = Form.empty
-        .addField("password", Schema.String)
-        .addField("confirm", Schema.String)
+        .addField(Form.makeField("password", Schema.String))
+        .addField(Form.makeField("confirm", Schema.String))
         .refine((values, ctx) => {
           if (values.password !== values.confirm) {
             return ctx.error("confirm", "Passwords must match")
@@ -1018,10 +1018,10 @@ describe("FormReact.build", () => {
         name: Schema.String.pipe(Schema.minLength(3, { message: () => "Name must be at least 3 characters" })),
       })
 
-      const formBuilder = Form.empty.addArray(
+      const formBuilder = Form.empty.addField(Form.makeArrayField(
         "items",
-        Form.empty.addField("name", ItemSchema.fields.name),
-      )
+        Form.empty.addField(Form.makeField("name", ItemSchema.fields.name)),
+      ))
 
       const runtime = createRuntime()
       const form = FormReact.build(formBuilder, {
@@ -1070,7 +1070,7 @@ describe("FormReact.build", () => {
 
       const NonEmpty = Schema.String.pipe(Schema.minLength(1, { message: () => "Required" }))
 
-      const formBuilder = Form.empty.addField("name", NonEmpty)
+      const formBuilder = Form.empty.addField(Form.makeField("name", NonEmpty))
 
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
@@ -1103,7 +1103,7 @@ describe("FormReact.build", () => {
 
       const NonEmpty = Schema.String.pipe(Schema.minLength(1, { message: () => "Required" }))
 
-      const formBuilder = Form.empty.addField("name", NonEmpty)
+      const formBuilder = Form.empty.addField(Form.makeField("name", NonEmpty))
 
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
@@ -1134,7 +1134,7 @@ describe("FormReact.build", () => {
 
       const NonEmpty = Schema.String.pipe(Schema.minLength(1, { message: () => "Required" }))
 
-      const formBuilder = Form.empty.addField("name", NonEmpty)
+      const formBuilder = Form.empty.addField(Form.makeField("name", NonEmpty))
 
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
@@ -1173,7 +1173,7 @@ describe("FormReact.build", () => {
     it("captures error when onSubmit Effect fails", async () => {
       const user = userEvent.setup()
 
-      const formBuilder = Form.empty.addField("name", Schema.String)
+      const formBuilder = Form.empty.addField(Form.makeField("name", Schema.String))
 
       const runtime = createRuntime()
       const form = FormReact.build(formBuilder, {
@@ -1211,7 +1211,7 @@ describe("FormReact.build", () => {
 
   describe("Subscribe component", () => {
     it("exposes submitResult with initial state", () => {
-      const formBuilder = Form.empty.addField("name", Schema.String)
+      const formBuilder = Form.empty.addField(Form.makeField("name", Schema.String))
 
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
@@ -1244,7 +1244,7 @@ describe("FormReact.build", () => {
     it("exposes submitResult.waiting during submission", async () => {
       const user = userEvent.setup()
 
-      const formBuilder = Form.empty.addField("name", Schema.String)
+      const formBuilder = Form.empty.addField(Form.makeField("name", Schema.String))
 
       const runtime = createRuntime()
       const form = FormReact.build(formBuilder, {
@@ -1285,7 +1285,7 @@ describe("FormReact.build", () => {
       const user = userEvent.setup()
 
       const NonEmpty = Schema.String.pipe(Schema.minLength(1, { message: () => "Required" }))
-      const formBuilder = Form.empty.addField("name", NonEmpty)
+      const formBuilder = Form.empty.addField(Form.makeField("name", NonEmpty))
 
       const runtime = createRuntime()
       const form = FormReact.build(formBuilder, {
@@ -1320,7 +1320,7 @@ describe("FormReact.build", () => {
     it("updates isDirty when values change", async () => {
       const user = userEvent.setup()
 
-      const formBuilder = Form.empty.addField("name", Schema.String)
+      const formBuilder = Form.empty.addField(Form.makeField("name", Schema.String))
 
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
@@ -1357,7 +1357,7 @@ describe("FormReact.build", () => {
     it("form does not reinitialize on rerender (mount-only initialization)", async () => {
       const user = userEvent.setup()
 
-      const formBuilder = Form.empty.addField("name", Schema.String)
+      const formBuilder = Form.empty.addField(Form.makeField("name", Schema.String))
 
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
@@ -1403,7 +1403,7 @@ describe("FormReact.build", () => {
     it("form reinitializes when using React key to force remount", async () => {
       const user = userEvent.setup()
 
-      const formBuilder = Form.empty.addField("name", Schema.String)
+      const formBuilder = Form.empty.addField(Form.makeField("name", Schema.String))
 
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
@@ -1450,7 +1450,7 @@ describe("FormReact.build", () => {
     it("isDirty becomes false when value returns to initial", async () => {
       const user = userEvent.setup()
 
-      const formBuilder = Form.empty.addField("name", Schema.String)
+      const formBuilder = Form.empty.addField(Form.makeField("name", Schema.String))
 
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
@@ -1492,7 +1492,7 @@ describe("FormReact.build", () => {
     it("isDirty remains after successful submission", async () => {
       const user = userEvent.setup()
 
-      const formBuilder = Form.empty.addField("name", Schema.String)
+      const formBuilder = Form.empty.addField(Form.makeField("name", Schema.String))
 
       const runtime = createRuntime()
       const form = FormReact.build(formBuilder, {
@@ -1537,7 +1537,7 @@ describe("FormReact.build", () => {
     it("reset() restores form to initial values", async () => {
       const user = userEvent.setup()
 
-      const formBuilder = Form.empty.addField("name", Schema.String)
+      const formBuilder = Form.empty.addField(Form.makeField("name", Schema.String))
 
       const runtime = createRuntime()
       const form = FormReact.build(formBuilder, {
@@ -1599,7 +1599,7 @@ describe("FormReact.build", () => {
     it("tracks submitCount through form atom", async () => {
       const user = userEvent.setup()
 
-      const formBuilder = Form.empty.addField("name", Schema.String)
+      const formBuilder = Form.empty.addField(Form.makeField("name", Schema.String))
 
       const runtime = createRuntime()
       const form = FormReact.build(formBuilder, {
@@ -1639,7 +1639,7 @@ describe("FormReact.build", () => {
 
   describe("setValue", () => {
     it("updates a scalar field value using Field identity", async () => {
-      const formBuilder = Form.empty.addField("name", Schema.String)
+      const formBuilder = Form.empty.addField(Form.makeField("name", Schema.String))
 
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
@@ -1681,7 +1681,7 @@ describe("FormReact.build", () => {
     })
 
     it("updates value using functional callback (prev => next)", async () => {
-      const formBuilder = Form.empty.addField("count", Schema.NumberFromString)
+      const formBuilder = Form.empty.addField(Form.makeField("count", Schema.NumberFromString))
 
       const NumberInput: React.FC<FormReact.FieldComponentProps<typeof Schema.NumberFromString>> = ({
         error,
@@ -1741,10 +1741,10 @@ describe("FormReact.build", () => {
 
     it("updates array items using functional callback (filter)", async () => {
       const itemForm = Form.empty
-        .addField("id", Schema.NumberFromString)
-        .addField("name", Schema.String)
+        .addField(Form.makeField("id", Schema.NumberFromString))
+        .addField(Form.makeField("name", Schema.String))
 
-      const formBuilder = Form.empty.addArray("items", itemForm)
+      const formBuilder = Form.empty.addField(Form.makeArrayField("items", itemForm))
 
       const ItemNameInput: React.FC<FormReact.FieldComponentProps<typeof Schema.String>> = ({
         onBlur,
@@ -1834,7 +1834,7 @@ describe("FormReact.build", () => {
     })
 
     it("marks field as dirty when value differs from initial", async () => {
-      const formBuilder = Form.empty.addField("name", Schema.String)
+      const formBuilder = Form.empty.addField(Form.makeField("name", Schema.String))
 
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
@@ -1875,7 +1875,7 @@ describe("FormReact.build", () => {
     })
 
     it("marks field as clean when value returns to initial", async () => {
-      const formBuilder = Form.empty.addField("name", Schema.String)
+      const formBuilder = Form.empty.addField(Form.makeField("name", Schema.String))
 
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
@@ -1923,14 +1923,14 @@ describe("FormReact.build", () => {
       expect(screen.queryByTestId("form-dirty")).not.toBeInTheDocument()
     })
 
-    it("clears nested dirty paths when parent object is replaced (zombie test)", async () => {
+    it("clears stale nested dirty paths when parent object is replaced", async () => {
       const addressForm = Form.empty
-        .addField("street", Schema.String)
-        .addField("city", Schema.String)
+        .addField(Form.makeField("street", Schema.String))
+        .addField(Form.makeField("city", Schema.String))
 
       const formBuilder = Form.empty
-        .addField("name", Schema.String)
-        .addArray("addresses", addressForm)
+        .addField(Form.makeField("name", Schema.String))
+        .addField(Form.makeArrayField("addresses", addressForm))
 
       const StreetInput: React.FC<FormReact.FieldComponentProps<typeof Schema.String>> = ({
         isDirty,
@@ -2061,7 +2061,7 @@ describe("FormReact.build", () => {
         </div>
       )
 
-      const formBuilder = Form.empty.addField("name", NonEmpty)
+      const formBuilder = Form.empty.addField(Form.makeField("name", NonEmpty))
 
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
@@ -2105,7 +2105,7 @@ describe("FormReact.build", () => {
     it("triggers validation in mounted components (onChange mode)", async () => {
       const NonEmpty = Schema.String.pipe(Schema.minLength(1, { message: () => "Required" }))
 
-      const formBuilder = Form.empty.addField("name", NonEmpty)
+      const formBuilder = Form.empty.addField(Form.makeField("name", NonEmpty))
 
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
@@ -2154,8 +2154,8 @@ describe("FormReact.build", () => {
 
     it("clears cross-field errors for the affected path", async () => {
       const formBuilder = Form.empty
-        .addField("password", Schema.String)
-        .addField("confirmPassword", Schema.String)
+        .addField(Form.makeField("password", Schema.String))
+        .addField(Form.makeField("confirmPassword", Schema.String))
         .refine((values, ctx) => {
           if (values.password !== values.confirmPassword) {
             return ctx.error("confirmPassword", "Passwords don't match")
@@ -2254,8 +2254,8 @@ describe("FormReact.build", () => {
   describe("setValues", () => {
     it("replaces entire form state", async () => {
       const formBuilder = Form.empty
-        .addField("firstName", Schema.String)
-        .addField("lastName", Schema.String)
+        .addField(Form.makeField("firstName", Schema.String))
+        .addField(Form.makeField("lastName", Schema.String))
 
       const FirstNameInput: React.FC<FormReact.FieldComponentProps<typeof Schema.String>> = ({
         onBlur,
@@ -2335,8 +2335,8 @@ describe("FormReact.build", () => {
 
     it("recalculates dirty state for all fields (global reset)", async () => {
       const formBuilder = Form.empty
-        .addField("firstName", Schema.String)
-        .addField("lastName", Schema.String)
+        .addField(Form.makeField("firstName", Schema.String))
+        .addField(Form.makeField("lastName", Schema.String))
 
       const FirstNameInput: React.FC<FormReact.FieldComponentProps<typeof Schema.String>> = ({
         isDirty,
@@ -2438,8 +2438,8 @@ describe("FormReact.build", () => {
 
     it("clears ALL cross-field errors", async () => {
       const formBuilder = Form.empty
-        .addField("password", Schema.String)
-        .addField("confirmPassword", Schema.String)
+        .addField(Form.makeField("password", Schema.String))
+        .addField(Form.makeField("confirmPassword", Schema.String))
         .refine((values, ctx) => {
           if (values.password !== values.confirmPassword) {
             return ctx.error("confirmPassword", "Passwords don't match")
@@ -2553,7 +2553,7 @@ describe("FormReact.build", () => {
         </div>
       )
 
-      const formBuilder = Form.empty.addField("name", NonEmpty)
+      const formBuilder = Form.empty.addField(Form.makeField("name", NonEmpty))
 
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),

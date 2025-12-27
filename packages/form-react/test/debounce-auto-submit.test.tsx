@@ -45,7 +45,7 @@ describe("Debounce and Auto-Submit", () => {
         Schema.minLength(5, { message: () => "Must be at least 5 characters" }),
       )
 
-      const formBuilder = Form.empty.addField("name", MinLength)
+      const formBuilder = Form.empty.addField(Form.makeField("name", MinLength))
 
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
@@ -86,7 +86,7 @@ describe("Debounce and Auto-Submit", () => {
       const user = userEvent.setup()
       const submitHandler = vi.fn()
 
-      const formBuilder = Form.empty.addField("name", Schema.String)
+      const formBuilder = Form.empty.addField(Form.makeField("name", Schema.String))
 
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
@@ -123,8 +123,8 @@ describe("Debounce and Auto-Submit", () => {
       const submitHandler = vi.fn()
 
       const formBuilder = Form.empty
-        .addField("name", Schema.String)
-        .addField("age", Schema.String)
+        .addField(Form.makeField("name", Schema.String))
+        .addField(Form.makeField("age", Schema.String))
 
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
@@ -170,7 +170,7 @@ describe("Debounce and Auto-Submit", () => {
         Schema.minLength(5, { message: () => "Must be at least 5 characters" }),
       )
 
-      const formBuilder = Form.empty.addField("name", MinLength)
+      const formBuilder = Form.empty.addField(Form.makeField("name", MinLength))
 
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
@@ -211,7 +211,7 @@ describe("Debounce and Auto-Submit", () => {
       const user = userEvent.setup()
       const submitHandler = vi.fn()
 
-      const formBuilder = Form.empty.addField("name", Schema.String)
+      const formBuilder = Form.empty.addField(Form.makeField("name", Schema.String))
 
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
@@ -244,7 +244,7 @@ describe("Debounce and Auto-Submit", () => {
       const user = userEvent.setup()
       const submitHandler = vi.fn()
 
-      const formBuilder = Form.empty.addField("name", Schema.String)
+      const formBuilder = Form.empty.addField(Form.makeField("name", Schema.String))
 
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
@@ -285,7 +285,7 @@ describe("Debounce and Auto-Submit", () => {
         Schema.minLength(5, { message: () => "Must be at least 5 characters" }),
       )
 
-      const formBuilder = Form.empty.addField("name", MinLength)
+      const formBuilder = Form.empty.addField(Form.makeField("name", MinLength))
 
       const form = FormReact.build(formBuilder, {
         runtime: createRuntime(),
