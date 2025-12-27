@@ -23,6 +23,44 @@ export const TypeId: unique symbol = Symbol.for("@lucas-barake/effect-form/Form"
  */
 export type TypeId = typeof TypeId
 
+/**
+ * Unique identifier for Field references.
+ *
+ * @since 1.0.0
+ * @category Symbols
+ */
+export const FieldTypeId: unique symbol = Symbol.for("@lucas-barake/effect-form/Field")
+
+/**
+ * @since 1.0.0
+ * @category Symbols
+ */
+export type FieldTypeId = typeof FieldTypeId
+
+/**
+ * A field reference carrying type and path info for type-safe setValue operations.
+ *
+ * @since 1.0.0
+ * @category Models
+ */
+export interface Field<S> {
+  readonly [FieldTypeId]: FieldTypeId
+  readonly _S: S
+  readonly key: string
+}
+
+/**
+ * Creates a field reference for type-safe setValue operations.
+ *
+ * @since 1.0.0
+ * @category Constructors
+ */
+export const makeFieldRef = <S>(key: string): Field<S> => ({
+  [FieldTypeId]: FieldTypeId,
+  _S: undefined as any,
+  key,
+})
+
 // ================================
 // Field Definition Types
 // ================================

@@ -1636,4 +1636,968 @@ describe("FormReact.build", () => {
       })
     })
   })
+
+  describe("setValue", () => {
+    it("updates a scalar field value using Field identity", async () => {
+      const formBuilder = Form.empty.addField("name", Schema.String)
+
+      const form = FormReact.build(formBuilder, {
+        runtime: createRuntime(),
+        fields: { name: TextInput },
+      })
+
+      const onSubmit = form.submit(() => Effect.void)
+
+      const ValuesDisplay = () => {
+        const { values } = form.useForm()
+        return <span data-testid="values">{values.name}</span>
+      }
+
+      const SetValueButton = () => {
+        const { setValue } = form.useForm()
+        return (
+          <button
+            data-testid="set-value-btn"
+            onClick={() => setValue(form.fields.name, "Updated")}
+          />
+        )
+      }
+
+      const user = userEvent.setup()
+      render(
+        <form.Form defaultValues={{ name: "Initial" }} onSubmit={onSubmit}>
+          <form.name />
+          <ValuesDisplay />
+          <SetValueButton />
+        </form.Form>,
+      )
+
+      expect(screen.getByTestId("values")).toHaveTextContent("Initial")
+
+      await user.click(screen.getByTestId("set-value-btn"))
+
+      expect(screen.getByTestId("values")).toHaveTextContent("Updated")
+      expect(screen.getByTestId("text-input")).toHaveValue("Updated")
+    })
+
+    it("updates value using functional callback (prev => next)", async () => {
+      const formBuilder = Form.empty.addField("count", Schema.NumberFromString)
+
+      const NumberInput: React.FC<FormReact.FieldComponentProps<typeof Schema.NumberFromString>> = ({
+        error,
+        onBlur,
+        onChange,
+        value,
+      }) => (
+        <div>
+          <input
+            type="text"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onBlur={onBlur}
+            data-testid="number-input"
+          />
+          {Option.isSome(error) && <span data-testid="error">{error.value}</span>}
+        </div>
+      )
+
+      const form = FormReact.build(formBuilder, {
+        runtime: createRuntime(),
+        fields: { count: NumberInput },
+      })
+
+      const onSubmit = form.submit(() => Effect.void)
+
+      const ValuesDisplay = () => {
+        const { values } = form.useForm()
+        return <span data-testid="count-value">{values.count}</span>
+      }
+
+      const IncrementButton = () => {
+        const { setValue } = form.useForm()
+        return (
+          <button
+            data-testid="increment-btn"
+            onClick={() => setValue(form.fields.count, (prev) => String(Number(prev) + 1))}
+          />
+        )
+      }
+
+      const user = userEvent.setup()
+      render(
+        <form.Form defaultValues={{ count: "5" }} onSubmit={onSubmit}>
+          <form.count />
+          <ValuesDisplay />
+          <IncrementButton />
+        </form.Form>,
+      )
+
+      expect(screen.getByTestId("count-value")).toHaveTextContent("5")
+
+      await user.click(screen.getByTestId("increment-btn"))
+
+      expect(screen.getByTestId("count-value")).toHaveTextContent("6")
+    })
+
+    it("updates array items using functional callback (filter)", async () => {
+      const itemForm = Form.empty
+        .addField("id", Schema.NumberFromString)
+        .addField("name", Schema.String)
+
+      const formBuilder = Form.empty.addArray("items", itemForm)
+
+      const ItemNameInput: React.FC<FormReact.FieldComponentProps<typeof Schema.String>> = ({
+        onBlur,
+        onChange,
+        value,
+      }) => (
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={onBlur}
+        />
+      )
+
+      const ItemIdInput: React.FC<FormReact.FieldComponentProps<typeof Schema.NumberFromString>> = ({
+        onBlur,
+        onChange,
+        value,
+      }) => (
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={onBlur}
+        />
+      )
+
+      const form = FormReact.build(formBuilder, {
+        runtime: createRuntime(),
+        fields: { items: { id: ItemIdInput, name: ItemNameInput } },
+      })
+
+      const onSubmit = form.submit(() => Effect.void)
+
+      const ItemsCount = () => {
+        const { values } = form.useForm()
+        return <span data-testid="items-count">{values.items.length}</span>
+      }
+
+      const ItemsNames = () => {
+        const { values } = form.useForm()
+        return <span data-testid="items-names">{values.items.map((i) => i.name).join(",")}</span>
+      }
+
+      const FilterButton = () => {
+        const { setValue } = form.useForm()
+        return (
+          <button
+            data-testid="filter-btn"
+            onClick={() => setValue(form.fields.items, (items) => items.filter((item) => item.name !== "Delete Me"))}
+          />
+        )
+      }
+
+      const user = userEvent.setup()
+      render(
+        <form.Form
+          defaultValues={{
+            items: [
+              { id: "1", name: "Keep" },
+              { id: "2", name: "Delete Me" },
+              { id: "3", name: "Also Keep" },
+            ],
+          }}
+          onSubmit={onSubmit}
+        >
+          <form.items>
+            {({ items }) =>
+              items.map((_, i) => (
+                <form.items.Item key={i} index={i}>
+                  <form.items.name />
+                </form.items.Item>
+              ))}
+          </form.items>
+          <ItemsCount />
+          <ItemsNames />
+          <FilterButton />
+        </form.Form>,
+      )
+
+      expect(screen.getByTestId("items-count")).toHaveTextContent("3")
+
+      await user.click(screen.getByTestId("filter-btn"))
+
+      expect(screen.getByTestId("items-count")).toHaveTextContent("2")
+      expect(screen.getByTestId("items-names")).toHaveTextContent("Keep,Also Keep")
+    })
+
+    it("marks field as dirty when value differs from initial", async () => {
+      const formBuilder = Form.empty.addField("name", Schema.String)
+
+      const form = FormReact.build(formBuilder, {
+        runtime: createRuntime(),
+        fields: { name: TextInput },
+      })
+
+      const onSubmit = form.submit(() => Effect.void)
+
+      const DirtyDisplay = () => {
+        const { isDirty } = form.useForm()
+        return isDirty ? <span data-testid="form-dirty">dirty</span> : null
+      }
+
+      const SetValueButton = () => {
+        const { setValue } = form.useForm()
+        return (
+          <button
+            data-testid="set-value-btn"
+            onClick={() => setValue(form.fields.name, "Changed")}
+          />
+        )
+      }
+
+      const user = userEvent.setup()
+      render(
+        <form.Form defaultValues={{ name: "Initial" }} onSubmit={onSubmit}>
+          <form.name />
+          <DirtyDisplay />
+          <SetValueButton />
+        </form.Form>,
+      )
+
+      expect(screen.queryByTestId("form-dirty")).not.toBeInTheDocument()
+
+      await user.click(screen.getByTestId("set-value-btn"))
+
+      expect(screen.getByTestId("form-dirty")).toBeInTheDocument()
+    })
+
+    it("marks field as clean when value returns to initial", async () => {
+      const formBuilder = Form.empty.addField("name", Schema.String)
+
+      const form = FormReact.build(formBuilder, {
+        runtime: createRuntime(),
+        fields: { name: TextInput },
+      })
+
+      const onSubmit = form.submit(() => Effect.void)
+
+      const DirtyDisplay = () => {
+        const { isDirty } = form.useForm()
+        return isDirty ? <span data-testid="form-dirty">dirty</span> : null
+      }
+
+      const SetValueButtons = () => {
+        const { setValue } = form.useForm()
+        return (
+          <>
+            <button
+              data-testid="change-btn"
+              onClick={() => setValue(form.fields.name, "Changed")}
+            />
+            <button
+              data-testid="restore-btn"
+              onClick={() => setValue(form.fields.name, "Initial")}
+            />
+          </>
+        )
+      }
+
+      const user = userEvent.setup()
+      render(
+        <form.Form defaultValues={{ name: "Initial" }} onSubmit={onSubmit}>
+          <form.name />
+          <DirtyDisplay />
+          <SetValueButtons />
+        </form.Form>,
+      )
+
+      expect(screen.queryByTestId("form-dirty")).not.toBeInTheDocument()
+
+      await user.click(screen.getByTestId("change-btn"))
+      expect(screen.getByTestId("form-dirty")).toBeInTheDocument()
+
+      await user.click(screen.getByTestId("restore-btn"))
+      expect(screen.queryByTestId("form-dirty")).not.toBeInTheDocument()
+    })
+
+    it("clears nested dirty paths when parent object is replaced (zombie test)", async () => {
+      const addressForm = Form.empty
+        .addField("street", Schema.String)
+        .addField("city", Schema.String)
+
+      const formBuilder = Form.empty
+        .addField("name", Schema.String)
+        .addArray("addresses", addressForm)
+
+      const StreetInput: React.FC<FormReact.FieldComponentProps<typeof Schema.String>> = ({
+        isDirty,
+        onBlur,
+        onChange,
+        value,
+      }) => (
+        <div>
+          <input
+            type="text"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onBlur={onBlur}
+            data-testid="street-input"
+          />
+          {isDirty && <span data-testid="street-dirty">dirty</span>}
+        </div>
+      )
+
+      const CityInput: React.FC<FormReact.FieldComponentProps<typeof Schema.String>> = ({
+        isDirty,
+        onBlur,
+        onChange,
+        value,
+      }) => (
+        <div>
+          <input
+            type="text"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onBlur={onBlur}
+            data-testid="city-input"
+          />
+          {isDirty && <span data-testid="city-dirty">dirty</span>}
+        </div>
+      )
+
+      const form = FormReact.build(formBuilder, {
+        runtime: createRuntime(),
+        fields: {
+          addresses: { city: CityInput, street: StreetInput },
+          name: TextInput,
+        },
+      })
+
+      const onSubmit = form.submit(() => Effect.void)
+
+      const DirtyDisplay = () => {
+        const { isDirty } = form.useForm()
+        return isDirty ? <span data-testid="form-dirty">dirty</span> : null
+      }
+
+      const ReplaceAddressesButton = () => {
+        const { setValue } = form.useForm()
+        return (
+          <button
+            data-testid="replace-addresses-btn"
+            onClick={() => setValue(form.fields.addresses, [{ city: "New City", street: "New Street" }])}
+          />
+        )
+      }
+
+      const user = userEvent.setup()
+      render(
+        <form.Form
+          defaultValues={{
+            addresses: [{ city: "Original City", street: "Original Street" }],
+            name: "Test",
+          }}
+          onSubmit={onSubmit}
+        >
+          <form.name />
+          <form.addresses>
+            {({ items }) =>
+              items.map((_, i) => (
+                <form.addresses.Item key={i} index={i}>
+                  <form.addresses.street />
+                  <form.addresses.city />
+                </form.addresses.Item>
+              ))}
+          </form.addresses>
+          <DirtyDisplay />
+          <ReplaceAddressesButton />
+        </form.Form>,
+      )
+
+      // Initially clean
+      expect(screen.queryByTestId("form-dirty")).not.toBeInTheDocument()
+
+      // Type in street to make it dirty
+      const streetInput = screen.getByTestId("street-input")
+      await user.clear(streetInput)
+      await user.type(streetInput, "Modified Street")
+
+      expect(screen.getByTestId("form-dirty")).toBeInTheDocument()
+      expect(screen.queryByTestId("street-dirty")).toBeInTheDocument()
+
+      // Now replace the entire addresses array - this should clear the nested dirty state
+      await user.click(screen.getByTestId("replace-addresses-btn"))
+
+      // The addresses array is now different from initial, so form is dirty
+      expect(screen.getByTestId("form-dirty")).toBeInTheDocument()
+
+      // But the street field shows the NEW value, not stale dirty state
+      expect(screen.getByTestId("street-input")).toHaveValue("New Street")
+    })
+
+    it("does not mark as touched by default", async () => {
+      const NonEmpty = Schema.String.pipe(Schema.minLength(1, { message: () => "Required" }))
+
+      const TouchedInput: React.FC<FormReact.FieldComponentProps<typeof NonEmpty>> = ({
+        error,
+        isTouched,
+        onBlur,
+        onChange,
+        value,
+      }) => (
+        <div>
+          <input
+            type="text"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onBlur={onBlur}
+            data-testid="text-input"
+          />
+          {isTouched && <span data-testid="touched">touched</span>}
+          {Option.isSome(error) && <span data-testid="error">{error.value}</span>}
+        </div>
+      )
+
+      const formBuilder = Form.empty.addField("name", NonEmpty)
+
+      const form = FormReact.build(formBuilder, {
+        runtime: createRuntime(),
+        fields: { name: TouchedInput },
+        mode: "onBlur",
+      })
+
+      const onSubmit = form.submit(() => Effect.void)
+
+      const TestComponent = () => {
+        const { setValue } = form.useForm()
+        return (
+          <button
+            data-testid="set-value-btn"
+            onClick={() => setValue(form.fields.name, "")}
+          />
+        )
+      }
+
+      const user = userEvent.setup()
+      render(
+        <form.Form defaultValues={{ name: "Initial" }} onSubmit={onSubmit}>
+          <form.name />
+          <TestComponent />
+        </form.Form>,
+      )
+
+      // Initially not touched
+      expect(screen.queryByTestId("touched")).not.toBeInTheDocument()
+
+      // Set value programmatically
+      await user.click(screen.getByTestId("set-value-btn"))
+
+      // Still not touched (setValue doesn't touch by default)
+      expect(screen.queryByTestId("touched")).not.toBeInTheDocument()
+
+      // And no error shown (onBlur mode, not touched, not submitted)
+      expect(screen.queryByTestId("error")).not.toBeInTheDocument()
+    })
+
+    it("triggers validation in mounted components (onChange mode)", async () => {
+      const NonEmpty = Schema.String.pipe(Schema.minLength(1, { message: () => "Required" }))
+
+      const formBuilder = Form.empty.addField("name", NonEmpty)
+
+      const form = FormReact.build(formBuilder, {
+        runtime: createRuntime(),
+        fields: { name: TextInput },
+        mode: "onChange",
+      })
+
+      const onSubmit = form.submit(() => Effect.void)
+
+      const TestComponent = () => {
+        const { setValue, submit } = form.useForm()
+        return (
+          <>
+            <button
+              data-testid="set-empty-btn"
+              onClick={() => setValue(form.fields.name, "")}
+            />
+            <button data-testid="submit-btn" onClick={submit} />
+          </>
+        )
+      }
+
+      const user = userEvent.setup()
+      render(
+        <form.Form defaultValues={{ name: "Initial" }} onSubmit={onSubmit}>
+          <form.name />
+          <TestComponent />
+        </form.Form>,
+      )
+
+      // No error initially
+      expect(screen.queryByTestId("error")).not.toBeInTheDocument()
+
+      // Set to invalid value - validation runs but errors are hidden until touched/submitted
+      await user.click(screen.getByTestId("set-empty-btn"))
+
+      // Errors are only shown after touch or submit (per form behavior)
+      // Submit to reveal any validation errors
+      await user.click(screen.getByTestId("submit-btn"))
+
+      // Now error should appear (reactive validation ran, submit reveals it)
+      await waitFor(() => {
+        expect(screen.getByTestId("error")).toHaveTextContent("Required")
+      })
+    })
+
+    it("clears cross-field errors for the affected path", async () => {
+      const formBuilder = Form.empty
+        .addField("password", Schema.String)
+        .addField("confirmPassword", Schema.String)
+        .refine((values, ctx) => {
+          if (values.password !== values.confirmPassword) {
+            return ctx.error("confirmPassword", "Passwords don't match")
+          }
+          return undefined
+        })
+
+      const PasswordInput: React.FC<FormReact.FieldComponentProps<typeof Schema.String>> = ({
+        onBlur,
+        onChange,
+        value,
+      }) => (
+        <div>
+          <input
+            type="password"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onBlur={onBlur}
+            data-testid="password-input"
+          />
+        </div>
+      )
+
+      const ConfirmPasswordInput: React.FC<FormReact.FieldComponentProps<typeof Schema.String>> = ({
+        error,
+        onBlur,
+        onChange,
+        value,
+      }) => (
+        <div>
+          <input
+            type="password"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onBlur={onBlur}
+            data-testid="confirm-password-input"
+          />
+          {Option.isSome(error) && <span data-testid="error">{error.value}</span>}
+        </div>
+      )
+
+      const form = FormReact.build(formBuilder, {
+        runtime: createRuntime(),
+        fields: {
+          confirmPassword: ConfirmPasswordInput,
+          password: PasswordInput,
+        },
+        mode: "onSubmit",
+      })
+
+      const onSubmit = form.submit(() => Effect.void)
+
+      const TestComponent = () => {
+        const { setValue, submit } = form.useForm()
+        return (
+          <>
+            <button data-testid="submit-btn" onClick={submit} />
+            <button
+              data-testid="fix-password-btn"
+              onClick={() => setValue(form.fields.confirmPassword, "matching")}
+            />
+          </>
+        )
+      }
+
+      const user = userEvent.setup()
+      render(
+        <form.Form
+          defaultValues={{ confirmPassword: "different", password: "matching" }}
+          onSubmit={onSubmit}
+        >
+          <form.password />
+          <form.confirmPassword />
+          <TestComponent />
+        </form.Form>,
+      )
+
+      // Submit to trigger cross-field validation
+      await user.click(screen.getByTestId("submit-btn"))
+
+      // Cross-field error should appear
+      await waitFor(() => {
+        expect(screen.getByTestId("error")).toHaveTextContent("Passwords don't match")
+      })
+
+      // Fix the password using setValue - should clear the cross-field error
+      await user.click(screen.getByTestId("fix-password-btn"))
+
+      // Error should be cleared
+      await waitFor(() => {
+        expect(screen.queryByTestId("error")).not.toBeInTheDocument()
+      })
+    })
+  })
+
+  describe("setValues", () => {
+    it("replaces entire form state", async () => {
+      const formBuilder = Form.empty
+        .addField("firstName", Schema.String)
+        .addField("lastName", Schema.String)
+
+      const FirstNameInput: React.FC<FormReact.FieldComponentProps<typeof Schema.String>> = ({
+        onBlur,
+        onChange,
+        value,
+      }) => (
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={onBlur}
+          data-testid="first-name-input"
+        />
+      )
+
+      const LastNameInput: React.FC<FormReact.FieldComponentProps<typeof Schema.String>> = ({
+        onBlur,
+        onChange,
+        value,
+      }) => (
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={onBlur}
+          data-testid="last-name-input"
+        />
+      )
+
+      const form = FormReact.build(formBuilder, {
+        runtime: createRuntime(),
+        fields: { firstName: FirstNameInput, lastName: LastNameInput },
+      })
+
+      const onSubmit = form.submit(() => Effect.void)
+
+      const ValuesDisplay = () => {
+        const { values } = form.useForm()
+        return (
+          <>
+            <span data-testid="first-name-value">{values.firstName}</span>
+            <span data-testid="last-name-value">{values.lastName}</span>
+          </>
+        )
+      }
+
+      const SetValuesButton = () => {
+        const { setValues } = form.useForm()
+        return (
+          <button
+            data-testid="set-all-btn"
+            onClick={() => setValues({ firstName: "Jane", lastName: "Smith" })}
+          />
+        )
+      }
+
+      const user = userEvent.setup()
+      render(
+        <form.Form defaultValues={{ firstName: "John", lastName: "Doe" }} onSubmit={onSubmit}>
+          <form.firstName />
+          <form.lastName />
+          <ValuesDisplay />
+          <SetValuesButton />
+        </form.Form>,
+      )
+
+      expect(screen.getByTestId("first-name-value")).toHaveTextContent("John")
+      expect(screen.getByTestId("last-name-value")).toHaveTextContent("Doe")
+
+      await user.click(screen.getByTestId("set-all-btn"))
+
+      expect(screen.getByTestId("first-name-value")).toHaveTextContent("Jane")
+      expect(screen.getByTestId("last-name-value")).toHaveTextContent("Smith")
+      expect(screen.getByTestId("first-name-input")).toHaveValue("Jane")
+      expect(screen.getByTestId("last-name-input")).toHaveValue("Smith")
+    })
+
+    it("recalculates dirty state for all fields (global reset)", async () => {
+      const formBuilder = Form.empty
+        .addField("firstName", Schema.String)
+        .addField("lastName", Schema.String)
+
+      const FirstNameInput: React.FC<FormReact.FieldComponentProps<typeof Schema.String>> = ({
+        isDirty,
+        onBlur,
+        onChange,
+        value,
+      }) => (
+        <div>
+          <input
+            type="text"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onBlur={onBlur}
+            data-testid="first-name-input"
+          />
+          {isDirty && <span data-testid="first-name-dirty">dirty</span>}
+        </div>
+      )
+
+      const LastNameInput: React.FC<FormReact.FieldComponentProps<typeof Schema.String>> = ({
+        isDirty,
+        onBlur,
+        onChange,
+        value,
+      }) => (
+        <div>
+          <input
+            type="text"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onBlur={onBlur}
+            data-testid="last-name-input"
+          />
+          {isDirty && <span data-testid="last-name-dirty">dirty</span>}
+        </div>
+      )
+
+      const form = FormReact.build(formBuilder, {
+        runtime: createRuntime(),
+        fields: { firstName: FirstNameInput, lastName: LastNameInput },
+      })
+
+      const onSubmit = form.submit(() => Effect.void)
+
+      const DirtyDisplay = () => {
+        const { isDirty } = form.useForm()
+        return isDirty ? <span data-testid="form-dirty">dirty</span> : null
+      }
+
+      const SetValuesButtons = () => {
+        const { setValues } = form.useForm()
+        return (
+          <>
+            <button
+              data-testid="set-to-initial-btn"
+              onClick={() => setValues({ firstName: "John", lastName: "Doe" })}
+            />
+            <button
+              data-testid="set-to-changed-btn"
+              onClick={() => setValues({ firstName: "Changed", lastName: "Values" })}
+            />
+          </>
+        )
+      }
+
+      const user = userEvent.setup()
+      render(
+        <form.Form defaultValues={{ firstName: "John", lastName: "Doe" }} onSubmit={onSubmit}>
+          <form.firstName />
+          <form.lastName />
+          <DirtyDisplay />
+          <SetValuesButtons />
+        </form.Form>,
+      )
+
+      // Initially clean
+      expect(screen.queryByTestId("form-dirty")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("first-name-dirty")).not.toBeInTheDocument()
+
+      // Type to make first name dirty
+      const firstNameInput = screen.getByTestId("first-name-input")
+      await user.clear(firstNameInput)
+      await user.type(firstNameInput, "Modified")
+
+      expect(screen.getByTestId("form-dirty")).toBeInTheDocument()
+      expect(screen.queryByTestId("first-name-dirty")).toBeInTheDocument()
+
+      // Set values back to initial - should be clean
+      await user.click(screen.getByTestId("set-to-initial-btn"))
+
+      expect(screen.queryByTestId("form-dirty")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("first-name-dirty")).not.toBeInTheDocument()
+
+      // Set values to something different - should be dirty again
+      await user.click(screen.getByTestId("set-to-changed-btn"))
+
+      expect(screen.getByTestId("form-dirty")).toBeInTheDocument()
+    })
+
+    it("clears ALL cross-field errors", async () => {
+      const formBuilder = Form.empty
+        .addField("password", Schema.String)
+        .addField("confirmPassword", Schema.String)
+        .refine((values, ctx) => {
+          if (values.password !== values.confirmPassword) {
+            return ctx.error("confirmPassword", "Passwords don't match")
+          }
+          return undefined
+        })
+
+      const PasswordInput: React.FC<FormReact.FieldComponentProps<typeof Schema.String>> = ({
+        onBlur,
+        onChange,
+        value,
+      }) => (
+        <input
+          type="password"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={onBlur}
+          data-testid="password-input"
+        />
+      )
+
+      const ConfirmPasswordInput: React.FC<FormReact.FieldComponentProps<typeof Schema.String>> = ({
+        error,
+        onBlur,
+        onChange,
+        value,
+      }) => (
+        <div>
+          <input
+            type="password"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onBlur={onBlur}
+            data-testid="confirm-password-input"
+          />
+          {Option.isSome(error) && <span data-testid="error">{error.value}</span>}
+        </div>
+      )
+
+      const form = FormReact.build(formBuilder, {
+        runtime: createRuntime(),
+        fields: {
+          confirmPassword: ConfirmPasswordInput,
+          password: PasswordInput,
+        },
+        mode: "onSubmit",
+      })
+
+      const onSubmit = form.submit(() => Effect.void)
+
+      const TestComponent = () => {
+        const { setValues, submit } = form.useForm()
+        return (
+          <>
+            <button data-testid="submit-btn" onClick={submit} />
+            <button
+              data-testid="set-all-btn"
+              onClick={() => setValues({ confirmPassword: "new", password: "new" })}
+            />
+          </>
+        )
+      }
+
+      const user = userEvent.setup()
+      render(
+        <form.Form
+          defaultValues={{ confirmPassword: "different", password: "matching" }}
+          onSubmit={onSubmit}
+        >
+          <form.password />
+          <form.confirmPassword />
+          <TestComponent />
+        </form.Form>,
+      )
+
+      // Submit to trigger cross-field validation
+      await user.click(screen.getByTestId("submit-btn"))
+
+      // Cross-field error should appear
+      await waitFor(() => {
+        expect(screen.getByTestId("error")).toHaveTextContent("Passwords don't match")
+      })
+
+      // Use setValues to replace all values - should clear ALL cross-field errors
+      await user.click(screen.getByTestId("set-all-btn"))
+
+      // Error should be cleared
+      await waitFor(() => {
+        expect(screen.queryByTestId("error")).not.toBeInTheDocument()
+      })
+    })
+
+    it("triggers validation for all mounted fields (onChange mode)", async () => {
+      const NonEmpty = Schema.String.pipe(Schema.minLength(1, { message: () => "Required" }))
+
+      const ErrorInput: React.FC<FormReact.FieldComponentProps<Schema.Schema<string, string, never>>> = ({
+        error,
+        onBlur,
+        onChange,
+        value,
+      }) => (
+        <div>
+          <input
+            type="text"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onBlur={onBlur}
+            data-testid="text-input"
+          />
+          {Option.isSome(error) && <span data-testid="error">{error.value}</span>}
+        </div>
+      )
+
+      const formBuilder = Form.empty.addField("name", NonEmpty)
+
+      const form = FormReact.build(formBuilder, {
+        runtime: createRuntime(),
+        fields: { name: ErrorInput },
+        mode: "onChange",
+      })
+
+      const onSubmit = form.submit(() => Effect.void)
+
+      const TestComponent = () => {
+        const { setValues, submit } = form.useForm()
+        return (
+          <>
+            <button
+              data-testid="set-empty-btn"
+              onClick={() => setValues({ name: "" })}
+            />
+            <button data-testid="submit-btn" onClick={submit} />
+          </>
+        )
+      }
+
+      const user = userEvent.setup()
+      render(
+        <form.Form defaultValues={{ name: "Initial" }} onSubmit={onSubmit}>
+          <form.name />
+          <TestComponent />
+        </form.Form>,
+      )
+
+      // No error initially
+      expect(screen.queryByTestId("error")).not.toBeInTheDocument()
+
+      // Set to invalid value using setValues - validation runs but errors are hidden until touched/submitted
+      await user.click(screen.getByTestId("set-empty-btn"))
+
+      // Errors are only shown after touch or submit (per form behavior)
+      // Submit to reveal any validation errors
+      await user.click(screen.getByTestId("submit-btn"))
+
+      // Now error should appear (reactive validation ran, submit reveals it)
+      await waitFor(() => {
+        expect(screen.getByTestId("error")).toHaveTextContent("Required")
+      })
+    })
+  })
 })

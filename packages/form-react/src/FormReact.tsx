@@ -139,6 +139,49 @@ const recalculateDirtyFieldsForArray = (
   return nextDirty
 }
 
+const recalculateDirtySubtree = (
+  currentDirty: ReadonlySet<string>,
+  allInitial: unknown,
+  allValues: unknown,
+  rootPath: string = "",
+): ReadonlySet<string> => {
+  const nextDirty = new Set(currentDirty)
+
+  if (rootPath === "") {
+    nextDirty.clear()
+  } else {
+    for (const path of nextDirty) {
+      if (path === rootPath || path.startsWith(rootPath + ".") || path.startsWith(rootPath + "[")) {
+        nextDirty.delete(path)
+      }
+    }
+  }
+
+  const targetValue = rootPath ? getNestedValue(allValues, rootPath) : allValues
+  const targetInitial = rootPath ? getNestedValue(allInitial, rootPath) : allInitial
+
+  const recurse = (current: unknown, initial: unknown, path: string): void => {
+    if (Array.isArray(current)) {
+      const initialArr = (initial ?? []) as ReadonlyArray<unknown>
+      for (let i = 0; i < Math.max(current.length, initialArr.length); i++) {
+        recurse(current[i], initialArr[i], path ? `${path}[${i}]` : `[${i}]`)
+      }
+    } else if (current !== null && typeof current === "object") {
+      const initialObj = (initial ?? {}) as Record<string, unknown>
+      const allKeys = new Set([...Object.keys(current as object), ...Object.keys(initialObj)])
+      for (const key of allKeys) {
+        recurse((current as Record<string, unknown>)[key], initialObj[key], path ? `${path}.${key}` : key)
+      }
+    } else {
+      const isEqual = Utils.structuralRegion(() => Equal.equals(current, initial))
+      if (!isEqual && path) nextDirty.add(path)
+    }
+  }
+
+  recurse(targetValue, targetInitial, rootPath)
+  return nextDirty
+}
+
 // ================================
 // Field Component Props
 // ================================
@@ -172,6 +215,18 @@ export interface FieldComponentProps<S extends Schema.Schema.Any> {
 export type FieldComponentMap<TFields extends Form.FieldsRecord> = {
   readonly [K in keyof TFields]: TFields[K] extends Form.FieldDef<infer S> ? React.FC<FieldComponentProps<S>>
     : TFields[K] extends Form.ArrayFieldDef<infer F> ? FieldComponentMap<F["fields"]>
+    : never
+}
+
+/**
+ * Maps field names to their type-safe Field references for setValue operations.
+ *
+ * @since 1.0.0
+ * @category Models
+ */
+export type FieldRefs<TFields extends Form.FieldsRecord> = {
+  readonly [K in keyof TFields]: TFields[K] extends Form.FieldDef<infer S> ? Form.Field<Schema.Schema.Encoded<S>>
+    : TFields[K] extends Form.ArrayFieldDef<infer F> ? Form.Field<ReadonlyArray<Form.EncodedFromFields<F["fields"]>>>
     : never
 }
 
@@ -209,6 +264,8 @@ export interface SubscribeState<TFields extends Form.FieldsRecord> {
   readonly submitResult: Result.Result<unknown, unknown>
   readonly submit: () => void
   readonly reset: () => void
+  readonly setValue: <S>(field: Form.Field<S>, update: S | ((prev: S) => S)) => void
+  readonly setValues: (values: Form.EncodedFromFields<TFields>) => void
 }
 
 // ================================
@@ -225,6 +282,7 @@ export interface SubscribeState<TFields extends Form.FieldsRecord> {
 export type BuiltForm<TFields extends Form.FieldsRecord, R> = {
   readonly atom: Atom.Writable<Option.Option<Form.FormState<TFields>>, Option.Option<Form.FormState<TFields>>>
   readonly schema: Schema.Schema<Form.DecodedFromFields<TFields>, Form.EncodedFromFields<TFields>, R>
+  readonly fields: FieldRefs<TFields>
 
   readonly Form: React.FC<{
     readonly defaultValues: Form.EncodedFromFields<TFields>
@@ -242,6 +300,8 @@ export type BuiltForm<TFields extends Form.FieldsRecord, R> = {
     readonly isDirty: boolean
     readonly submitResult: Result.Result<unknown, unknown>
     readonly values: Form.EncodedFromFields<TFields>
+    readonly setValue: <S>(field: Form.Field<S>, update: S | ((prev: S) => S)) => void
+    readonly setValues: (values: Form.EncodedFromFields<TFields>) => void
   }
 
   readonly submit: <A, E>(
@@ -256,16 +316,22 @@ type FieldComponents<TFields extends Form.FieldsRecord> = {
     : never
 }
 
-interface ArrayFieldComponent<TItemFields extends Form.FieldsRecord> extends
-  React.FC<{
+type ArrayFieldComponent<TItemFields extends Form.FieldsRecord> =
+  & React.FC<{
     readonly children: (ops: ArrayFieldOperations<Form.EncodedFromFields<TItemFields>>) => React.ReactNode
   }>
-{
-  readonly Item: React.FC<{
-    readonly index: number
-    readonly children: React.ReactNode | ((props: { readonly remove: () => void }) => React.ReactNode)
-  }>
-}
+  & {
+    readonly Item: React.FC<{
+      readonly index: number
+      readonly children: React.ReactNode | ((props: { readonly remove: () => void }) => React.ReactNode)
+    }>
+  }
+  & {
+    readonly [K in keyof TItemFields]: TItemFields[K] extends Form.FieldDef<any> ? React.FC
+      : TItemFields[K] extends Form.ArrayFieldDef<infer F>
+        ? ArrayFieldComponent<F extends Form.FormBuilder<infer IF, any> ? IF : never>
+      : never
+  }
 
 // ================================
 // Internal Types
@@ -458,6 +524,23 @@ const makeFieldComponent = <S extends Schema.Schema.Any>(
       && parsedMode.debounce !== null
       && !parsedMode.autoSubmit
     const validate = useDebounced(validateImmediate, shouldDebounceValidation ? parsedMode.debounce : null)
+
+    // Reactive validation for programmatic setValue/setValues. prevValueRef avoids
+    // race condition where React batches mount + setValue in a single render.
+    const prevValueRef = React.useRef(value)
+    React.useEffect(() => {
+      if (prevValueRef.current === value) {
+        return
+      }
+      prevValueRef.current = value
+
+      const shouldValidate = parsedMode.validation === "onChange"
+        || (parsedMode.validation === "onBlur" && isTouched)
+
+      if (shouldValidate) {
+        validate(value)
+      }
+    }, [value, isTouched, validate])
 
     const perFieldError: Option.Option<string> = React.useMemo(() => {
       if (validationResult._tag === "Failure") {
@@ -1076,15 +1159,82 @@ export const build = <TFields extends Form.FieldsRecord, R, ER = never>(
       callDecodeAndSubmit(Atom.Reset)
     }, [setFormState, setCrossFieldErrors, callDecodeAndSubmit, registry])
 
-    return { submit, reset, isDirty, submitResult: decodeAndSubmitResult, values: formValues }
+    const setValue = React.useCallback(<S,>(
+      field: Form.Field<S>,
+      update: S | ((prev: S) => S),
+    ) => {
+      const path = field.key
+
+      setFormState((prev) => {
+        if (Option.isNone(prev)) return prev
+        const state = prev.value
+
+        const currentValue = getNestedValue(state.values, path) as S
+        const newValue = typeof update === "function"
+          ? (update as (prev: S) => S)(currentValue)
+          : update
+
+        const newValues = setNestedValue(state.values, path, newValue)
+        const newDirtyFields = recalculateDirtySubtree(
+          state.dirtyFields,
+          state.initialValues,
+          newValues,
+          path,
+        )
+
+        return Option.some({
+          ...state,
+          values: newValues,
+          dirtyFields: newDirtyFields,
+        })
+      })
+
+      // Clear cross-field errors for this path and children
+      setCrossFieldErrors((prev) => {
+        let changed = false
+        const next = new Map(prev)
+        for (const errorPath of prev.keys()) {
+          if (errorPath === path || errorPath.startsWith(path + ".") || errorPath.startsWith(path + "[")) {
+            next.delete(errorPath)
+            changed = true
+          }
+        }
+        return changed ? next : prev
+      })
+    }, [setFormState, setCrossFieldErrors])
+
+    const setValues = React.useCallback((values: Form.EncodedFromFields<TFields>) => {
+      setFormState((prev) => {
+        if (Option.isNone(prev)) return prev
+        const state = prev.value
+
+        const newDirtyFields = recalculateDirtySubtree(
+          state.dirtyFields,
+          state.initialValues,
+          values,
+          "",
+        )
+
+        return Option.some({
+          ...state,
+          values,
+          dirtyFields: newDirtyFields,
+        })
+      })
+
+      // Clear ALL cross-field errors
+      setCrossFieldErrors(new Map())
+    }, [setFormState, setCrossFieldErrors])
+
+    return { submit, reset, isDirty, submitResult: decodeAndSubmitResult, values: formValues, setValue, setValues }
   }
 
   const SubscribeComponent: React.FC<{
     readonly children: (state: SubscribeState<TFields>) => React.ReactNode
   }> = ({ children }) => {
-    const { isDirty, reset, submit, submitResult, values } = useFormHook()
+    const { isDirty, reset, setValue, setValues, submit, submitResult, values } = useFormHook()
 
-    return <>{children({ values, isDirty, submitResult, submit, reset })}</>
+    return <>{children({ values, isDirty, submitResult, submit, reset, setValue, setValues })}</>
   }
 
   const submitHelper = <A, E>(
@@ -1103,9 +1253,14 @@ export const build = <TFields extends Form.FieldsRecord, R, ER = never>(
     components,
   )
 
+  const fieldRefs = Object.fromEntries(
+    Object.keys(fields).map((key) => [key, Form.makeFieldRef(key)]),
+  ) as FieldRefs<TFields>
+
   return {
     atom: stateAtom,
     schema: combinedSchema,
+    fields: fieldRefs,
     Form: FormComponent,
     Subscribe: SubscribeComponent,
     useForm: useFormHook,
