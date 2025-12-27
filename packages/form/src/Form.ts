@@ -108,6 +108,7 @@ export interface FormState<TFields extends FieldsRecord> {
   readonly initialValues: EncodedFromFields<TFields>
   readonly touched: { readonly [K in keyof TFields]: boolean }
   readonly submitCount: number
+  readonly dirtyFields: ReadonlySet<string>
 }
 
 // ================================

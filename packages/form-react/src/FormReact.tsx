@@ -83,6 +83,63 @@ const schemaPathToFieldPath = (path: ReadonlyArray<PropertyKey>): string => {
 }
 
 // ================================
+// Dirty Field Helpers
+// ================================
+
+const isPathOrParentDirty = (dirtyFields: ReadonlySet<string>, path: string): boolean => {
+  if (dirtyFields.has(path)) return true
+
+  let parent = path
+  while (true) {
+    const lastDot = parent.lastIndexOf(".")
+    const lastBracket = parent.lastIndexOf("[")
+    const splitIndex = Math.max(lastDot, lastBracket)
+
+    if (splitIndex === -1) break
+
+    parent = parent.substring(0, splitIndex)
+    if (dirtyFields.has(parent)) return true
+  }
+
+  return false
+}
+
+const recalculateDirtyFieldsForArray = (
+  dirtyFields: ReadonlySet<string>,
+  initialValues: unknown,
+  arrayPath: string,
+  newItems: ReadonlyArray<unknown>,
+): ReadonlySet<string> => {
+  const nextDirty = new Set(
+    Array.from(dirtyFields).filter(
+      (path) => path !== arrayPath && !path.startsWith(arrayPath + ".") && !path.startsWith(arrayPath + "["),
+    ),
+  )
+
+  const initialItems = (getNestedValue(initialValues, arrayPath) ?? []) as ReadonlyArray<unknown>
+
+  const loopLength = Math.max(newItems.length, initialItems.length)
+  for (let i = 0; i < loopLength; i++) {
+    const itemPath = `${arrayPath}[${i}]`
+    const newItem = newItems[i]
+    const initialItem = initialItems[i]
+
+    const isEqual = Utils.structuralRegion(() => Equal.equals(newItem, initialItem))
+    if (!isEqual) {
+      nextDirty.add(itemPath)
+    }
+  }
+
+  if (newItems.length !== initialItems.length) {
+    nextDirty.add(arrayPath)
+  } else {
+    nextDirty.delete(arrayPath)
+  }
+
+  return nextDirty
+}
+
+// ================================
 // Field Component Props
 // ================================
 
@@ -365,6 +422,7 @@ const makeFieldComponent = <S extends Schema.Schema.Any>(
   fieldDef: Form.FieldDef<S>,
   crossFieldErrorsAtom: Atom.Writable<Map<string, string>, Map<string, string>>,
   submitCountAtom: Atom.Atom<number>,
+  dirtyFieldsAtom: Atom.Atom<ReadonlySet<string>>,
   parsedMode: ParsedMode,
   getOrCreateValidationAtom: (
     fieldPath: string,
@@ -378,13 +436,12 @@ const makeFieldComponent = <S extends Schema.Schema.Any>(
     const autoSubmitOnBlur = useContext(AutoSubmitContext)
     const fieldPath = arrayCtx ? `${arrayCtx.parentPath}.${fieldKey}` : fieldKey
 
-    const { crossFieldErrorAtom, initialValueAtom, touchedAtom, valueAtom } = React.useMemo(
+    const { crossFieldErrorAtom, touchedAtom, valueAtom } = React.useMemo(
       () => getOrCreateFieldAtoms(fieldPath),
       [fieldPath],
     )
 
     const [value, setValue] = useAtom(valueAtom) as [Schema.Schema.Encoded<S>, (v: unknown) => void]
-    const initialValue = useAtomValue(initialValueAtom) as Schema.Schema.Encoded<S>
     const [isTouched, setTouched] = useAtom(touchedAtom)
     const crossFieldError = useAtomValue(crossFieldErrorAtom)
     const setCrossFieldErrors = useAtomSet(crossFieldErrorsAtom)
@@ -440,7 +497,11 @@ const makeFieldComponent = <S extends Schema.Schema.Any>(
       autoSubmitOnBlur?.()
     }, [setTouched, validate, value, autoSubmitOnBlur])
 
-    const isDirty = !Equal.equals(value, initialValue)
+    const dirtyFields = useAtomValue(dirtyFieldsAtom)
+    const isDirty = React.useMemo(
+      () => isPathOrParentDirty(dirtyFields, fieldPath),
+      [dirtyFields, fieldPath],
+    )
     const isValidating = validationResult.waiting
     const shouldShowError = isTouched || submitCount > 0
 
@@ -470,6 +531,7 @@ const makeArrayFieldComponent = <TItemFields extends Form.FieldsRecord>(
   stateAtom: Atom.Writable<Option.Option<Form.FormState<any>>, Option.Option<Form.FormState<any>>>,
   crossFieldErrorsAtom: Atom.Writable<Map<string, string>, Map<string, string>>,
   submitCountAtom: Atom.Atom<number>,
+  dirtyFieldsAtom: Atom.Atom<ReadonlySet<string>>,
   parsedMode: ParsedMode,
   getOrCreateValidationAtom: (
     fieldPath: string,
@@ -502,9 +564,11 @@ const makeArrayFieldComponent = <TItemFields extends Form.FieldsRecord>(
           const currentItems = (getNestedValue(state.values, fieldPath) ?? []) as ReadonlyArray<
             Form.EncodedFromFields<TItemFields>
           >
+          const newItems = [...currentItems, newItem]
           return Option.some({
             ...state,
-            values: setNestedValue(state.values, fieldPath, [...currentItems, newItem]),
+            values: setNestedValue(state.values, fieldPath, newItems),
+            dirtyFields: recalculateDirtyFieldsForArray(state.dirtyFields, state.initialValues, fieldPath, newItems),
           })
         })
       },
@@ -519,13 +583,11 @@ const makeArrayFieldComponent = <TItemFields extends Form.FieldsRecord>(
           const currentItems = (getNestedValue(state.values, fieldPath) ?? []) as ReadonlyArray<
             Form.EncodedFromFields<TItemFields>
           >
+          const newItems = currentItems.filter((_, i) => i !== index)
           return Option.some({
             ...state,
-            values: setNestedValue(
-              state.values,
-              fieldPath,
-              currentItems.filter((_, i) => i !== index),
-            ),
+            values: setNestedValue(state.values, fieldPath, newItems),
+            dirtyFields: recalculateDirtyFieldsForArray(state.dirtyFields, state.initialValues, fieldPath, newItems),
           })
         })
       },
@@ -547,6 +609,7 @@ const makeArrayFieldComponent = <TItemFields extends Form.FieldsRecord>(
           return Option.some({
             ...state,
             values: setNestedValue(state.values, fieldPath, newItems),
+            dirtyFields: recalculateDirtyFieldsForArray(state.dirtyFields, state.initialValues, fieldPath, newItems),
           })
         })
       },
@@ -567,6 +630,7 @@ const makeArrayFieldComponent = <TItemFields extends Form.FieldsRecord>(
           return Option.some({
             ...state,
             values: setNestedValue(state.values, fieldPath, newItems),
+            dirtyFields: recalculateDirtyFieldsForArray(state.dirtyFields, state.initialValues, fieldPath, newItems),
           })
         })
       },
@@ -591,13 +655,11 @@ const makeArrayFieldComponent = <TItemFields extends Form.FieldsRecord>(
         if (Option.isNone(prev)) return prev
         const state = prev.value
         const currentItems = (getNestedValue(state.values, parentPath) ?? []) as Array<any>
+        const newItems = currentItems.filter((_, i) => i !== index)
         return Option.some({
           ...state,
-          values: setNestedValue(
-            state.values,
-            parentPath,
-            currentItems.filter((_, i) => i !== index),
-          ),
+          values: setNestedValue(state.values, parentPath, newItems),
+          dirtyFields: recalculateDirtyFieldsForArray(state.dirtyFields, state.initialValues, parentPath, newItems),
         })
       })
     }, [parentPath, index, setFormState])
@@ -618,6 +680,7 @@ const makeArrayFieldComponent = <TItemFields extends Form.FieldsRecord>(
         itemDef,
         crossFieldErrorsAtom,
         submitCountAtom,
+        dirtyFieldsAtom,
         parsedMode,
         getOrCreateValidationAtom,
         getOrCreateFieldAtoms,
@@ -650,6 +713,7 @@ const makeFieldComponents = <TFields extends Form.FieldsRecord>(
   stateAtom: Atom.Writable<Option.Option<Form.FormState<TFields>>, Option.Option<Form.FormState<TFields>>>,
   crossFieldErrorsAtom: Atom.Writable<Map<string, string>, Map<string, string>>,
   submitCountAtom: Atom.Atom<number>,
+  dirtyFieldsAtom: Atom.Atom<ReadonlySet<string>>,
   parsedMode: ParsedMode,
   getOrCreateValidationAtom: (
     fieldPath: string,
@@ -669,6 +733,7 @@ const makeFieldComponents = <TFields extends Form.FieldsRecord>(
         stateAtom,
         crossFieldErrorsAtom,
         submitCountAtom,
+        dirtyFieldsAtom,
         parsedMode,
         getOrCreateValidationAtom,
         getOrCreateFieldAtoms,
@@ -681,6 +746,7 @@ const makeFieldComponents = <TFields extends Form.FieldsRecord>(
         def,
         crossFieldErrorsAtom,
         submitCountAtom,
+        dirtyFieldsAtom,
         parsedMode,
         getOrCreateValidationAtom,
         getOrCreateFieldAtoms,
@@ -761,14 +827,31 @@ export const build = <TFields extends Form.FieldsRecord, R, ER = never>(
   const stateAtom = Atom.make(Option.none<Form.FormState<TFields>>()).pipe(Atom.setIdleTTL(0))
   const crossFieldErrorsAtom = Atom.make<Map<string, string>>(new Map()).pipe(Atom.setIdleTTL(0))
 
-  const isDirtyAtom = Atom.readable((get) => {
-    const state = Option.getOrThrow(get(stateAtom))
-    // structuralRegion enables deep structural equality for nested objects
-    return !Utils.structuralRegion(() => Equal.equals(state.values, state.initialValues))
-  }).pipe(Atom.setIdleTTL(0))
+  const dirtyFieldsAtom = Atom.readable((get) => Option.getOrThrow(get(stateAtom)).dirtyFields).pipe(Atom.setIdleTTL(0))
+
+  const isDirtyAtom = Atom.readable((get) => Option.getOrThrow(get(stateAtom)).dirtyFields.size > 0).pipe(
+    Atom.setIdleTTL(0),
+  )
   const submitCountAtom = Atom.readable((get) => Option.getOrThrow(get(stateAtom)).submitCount).pipe(Atom.setIdleTTL(0))
   const onSubmitAtom = Atom.make<Atom.AtomResultFn<Form.DecodedFromFields<TFields>, unknown, unknown> | null>(null)
     .pipe(Atom.setIdleTTL(0))
+
+  const updateDirtyFields = (
+    state: Form.FormState<TFields>,
+    fieldPath: string,
+    newValue: unknown,
+  ): ReadonlySet<string> => {
+    const initialValue = getNestedValue(state.initialValues, fieldPath)
+    const isEqual = Utils.structuralRegion(() => Equal.equals(newValue, initialValue))
+
+    const newDirtyFields = new Set(state.dirtyFields)
+    if (!isEqual) {
+      newDirtyFields.add(fieldPath)
+    } else {
+      newDirtyFields.delete(fieldPath)
+    }
+    return newDirtyFields
+  }
 
   const validationAtomsRegistry = createWeakRegistry<Atom.AtomResultFn<unknown, void, ParseResult.ParseError>>()
   const fieldAtomsRegistry = createWeakRegistry<FieldAtoms>()
@@ -804,6 +887,7 @@ export const build = <TFields extends Form.FieldsRecord, R, ER = never>(
           Option.some({
             ...currentState,
             values: setNestedValue(currentState.values, fieldPath, value),
+            dirtyFields: updateDirtyFields(currentState, fieldPath, value),
           }),
         )
       },
@@ -880,6 +964,7 @@ export const build = <TFields extends Form.FieldsRecord, R, ER = never>(
         initialValues: defaultValues,
         touched: Form.createTouchedRecord(fields, false) as { readonly [K in keyof TFields]: boolean },
         submitCount: 0,
+        dirtyFields: new Set(),
       }))
       // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional mount-only initialization
     }, [])
@@ -983,6 +1068,7 @@ export const build = <TFields extends Form.FieldsRecord, R, ER = never>(
           initialValues: state.initialValues,
           touched: Form.createTouchedRecord(fields, false) as { readonly [K in keyof TFields]: boolean },
           submitCount: 0,
+          dirtyFields: new Set(),
         })
       })
       setCrossFieldErrors(new Map())
@@ -1010,6 +1096,7 @@ export const build = <TFields extends Form.FieldsRecord, R, ER = never>(
     stateAtom,
     crossFieldErrorsAtom,
     submitCountAtom,
+    dirtyFieldsAtom,
     parsedMode,
     getOrCreateValidationAtom,
     getOrCreateFieldAtoms,
