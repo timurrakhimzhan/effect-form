@@ -57,7 +57,7 @@ const LoginForm = FormReact.build(loginFormBuilder, {
       </div>
     ),
   },
-  onSubmit: (values) => Effect.log(`Login: ${values.email}`),
+  onSubmit: (_, { decoded }) => Effect.log(`Login: ${decoded.email}`),
 })
 
 // Subscribe to atoms anywhere in the tree
@@ -100,7 +100,7 @@ const OrderForm = FormReact.build(orderFormBuilder, {
     title: TitleInput,
     items: { name: ItemNameInput },
   },
-  onSubmit: (values) => Effect.log(`Order: ${values.title}`),
+  onSubmit: (_, { decoded }) => Effect.log(`Order: ${decoded.title}`),
 })
 
 function OrderPage() {
@@ -218,7 +218,7 @@ const signupFormBuilder = FormBuilder.empty
 const SignupForm = FormReact.build(signupFormBuilder, {
   runtime,
   fields: { username: UsernameInput },
-  onSubmit: (values) => Effect.log(`Signup: ${values.username}`),
+  onSubmit: (_, { decoded }) => Effect.log(`Signup: ${decoded.username}`),
 })
 ```
 
@@ -427,6 +427,34 @@ function FormWithSideEffects({ onClose }: { onClose: () => void }) {
 }
 ```
 
+## 14. Custom Submit Arguments
+
+Pass custom arguments to `onSubmit` by annotating the first parameter:
+
+```tsx
+// Define form with custom submit args
+const ContactForm = FormReact.build(formBuilder, {
+  runtime,
+  fields: { email: TextInput, message: TextInput },
+  onSubmit: (args: { source: string }, { decoded, encoded, get }) =>
+    Effect.log(`Contact from ${args.source}: ${decoded.email}`),
+})
+
+// Pass args when submitting
+function SubmitButton({ source }: { source: string }) {
+  const submit = useAtomSet(ContactForm.submit)
+  return <button onClick={() => submit({ source })}>Send</button>
+}
+```
+
+The `onSubmit` callback receives:
+- `args` - Custom arguments passed to `submit(args)`
+- `decoded` - Schema-decoded values
+- `encoded` - Raw encoded values
+- `get` - Atom context for reading/writing other atoms
+
+> **Note:** Auto-submit mode is only available when `args` is `void`. TypeScript will prevent using `autoSubmit: true` with custom arguments since there's no way to provide them automatically.
+
 ## Available Atoms
 
 All forms expose these atoms for fine-grained subscriptions:
@@ -437,7 +465,7 @@ form.isDirty                 // Atom<boolean> - values differ from initial
 form.hasChangedSinceSubmit   // Atom<boolean> - values differ from last submit
 form.lastSubmittedValues     // Atom<Option<SubmittedValues>> - last submitted values
 form.submitCount             // Atom<number> - number of submit attempts
-form.submit                  // AtomResultFn<void, A, E | ParseError> - submit with .waiting, ._tag
+form.submit                  // AtomResultFn<SubmitArgs, A, E | ParseError> - submit with .waiting, ._tag
 ```
 
 > **Why `Option` for `values`?** Returns `None` before the form is initialized, `Some(values)` after. This allows parent components to safely subscribe and wait for initialization without throwing.
