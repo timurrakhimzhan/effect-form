@@ -2,78 +2,97 @@
   "name": "@lucas-barake/effect-form",
   "version": "0.14.0",
   "description": "Type-safe form builder powered by Effect Schema",
-  "license": "MIT",
+  "type": "module",
+  "publishConfig": {
+    "access": "public",
+    "directory": "dist"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/lucas-barake/effect-form.git"
   },
-  "sideEffects": [],
-  "author": "Lucas Barake",
   "homepage": "https://github.com/lucas-barake/effect-form",
+  "scripts": {
+    "build": "pnpm build-esm && pnpm build-cjs && pnpm build-annotate && pnpm build-pack",
+    "build-pack": "rm -rf dist && mkdir -p dist/dist && cp -r build/* dist/dist/ && cp package.json dist/ && cp ../../LICENSE dist/ && cp README.md dist/ 2>/dev/null || true",
+    "build-esm": "tsc -b tsconfig.build.json",
+    "build-cjs": "babel build/esm --plugins @babel/transform-export-namespace-from --plugins @babel/transform-modules-commonjs --out-dir build/cjs --source-maps",
+    "build-annotate": "babel build --plugins annotate-pure-calls --out-dir build --source-maps"
+  },
+  "keywords": [
+    "effect",
+    "form",
+    "schema",
+    "validation",
+    "typescript"
+  ],
+  "author": "Lucas Barake",
+  "license": "MIT",
+  "sideEffects": [],
   "peerDependencies": {
     "@effect-atom/atom": "^0.4.8",
     "effect": "^3.19.0"
   },
-  "main": "./dist/cjs/index.js",
-  "module": "./dist/esm/index.js",
-  "types": "./dist/dts/index.d.ts",
+  "main": "./dist/dist/cjs/index.js",
+  "module": "./dist/dist/esm/index.js",
+  "types": "./dist/dist/dts/index.d.ts",
   "exports": {
     "./package.json": "./package.json",
     ".": {
-      "types": "./dist/dts/index.d.ts",
-      "import": "./dist/esm/index.js",
-      "default": "./dist/cjs/index.js"
+      "types": "./dist/dist/dts/index.d.ts",
+      "import": "./dist/dist/esm/index.js",
+      "default": "./dist/dist/cjs/index.js"
     },
     "./Field": {
-      "types": "./dist/dts/Field.d.ts",
-      "import": "./dist/esm/Field.js",
-      "default": "./dist/cjs/Field.js"
+      "types": "./dist/dist/dts/Field.d.ts",
+      "import": "./dist/dist/esm/Field.js",
+      "default": "./dist/dist/cjs/Field.js"
     },
     "./FormAtoms": {
-      "types": "./dist/dts/FormAtoms.d.ts",
-      "import": "./dist/esm/FormAtoms.js",
-      "default": "./dist/cjs/FormAtoms.js"
+      "types": "./dist/dist/dts/FormAtoms.d.ts",
+      "import": "./dist/dist/esm/FormAtoms.js",
+      "default": "./dist/dist/cjs/FormAtoms.js"
     },
     "./FormBuilder": {
-      "types": "./dist/dts/FormBuilder.d.ts",
-      "import": "./dist/esm/FormBuilder.js",
-      "default": "./dist/cjs/FormBuilder.js"
+      "types": "./dist/dist/dts/FormBuilder.d.ts",
+      "import": "./dist/dist/esm/FormBuilder.js",
+      "default": "./dist/dist/cjs/FormBuilder.js"
     },
     "./Mode": {
-      "types": "./dist/dts/Mode.d.ts",
-      "import": "./dist/esm/Mode.js",
-      "default": "./dist/cjs/Mode.js"
+      "types": "./dist/dist/dts/Mode.d.ts",
+      "import": "./dist/dist/esm/Mode.js",
+      "default": "./dist/dist/cjs/Mode.js"
     },
     "./Path": {
-      "types": "./dist/dts/Path.d.ts",
-      "import": "./dist/esm/Path.js",
-      "default": "./dist/cjs/Path.js"
+      "types": "./dist/dist/dts/Path.d.ts",
+      "import": "./dist/dist/esm/Path.js",
+      "default": "./dist/dist/cjs/Path.js"
     },
     "./Validation": {
-      "types": "./dist/dts/Validation.d.ts",
-      "import": "./dist/esm/Validation.js",
-      "default": "./dist/cjs/Validation.js"
+      "types": "./dist/dist/dts/Validation.d.ts",
+      "import": "./dist/dist/esm/Validation.js",
+      "default": "./dist/dist/cjs/Validation.js"
     }
   },
   "typesVersions": {
     "*": {
       "Field": [
-        "./dist/dts/Field.d.ts"
+        "./dist/dist/dts/Field.d.ts"
       ],
       "FormAtoms": [
-        "./dist/dts/FormAtoms.d.ts"
+        "./dist/dist/dts/FormAtoms.d.ts"
       ],
       "FormBuilder": [
-        "./dist/dts/FormBuilder.d.ts"
+        "./dist/dist/dts/FormBuilder.d.ts"
       ],
       "Mode": [
-        "./dist/dts/Mode.d.ts"
+        "./dist/dist/dts/Mode.d.ts"
       ],
       "Path": [
-        "./dist/dts/Path.d.ts"
+        "./dist/dist/dts/Path.d.ts"
       ],
       "Validation": [
-        "./dist/dts/Validation.d.ts"
+        "./dist/dist/dts/Validation.d.ts"
       ]
     }
   }

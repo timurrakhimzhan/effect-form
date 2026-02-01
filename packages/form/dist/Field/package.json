@@ -1,6 +1,0 @@
-{
-  "main": "../dist/cjs/Field.js",
-  "module": "../dist/esm/Field.js",
-  "types": "../dist/dts/Field.d.ts",
-  "sideEffects": []
-}

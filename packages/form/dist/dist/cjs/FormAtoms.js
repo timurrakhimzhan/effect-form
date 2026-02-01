@@ -10,6 +10,7 @@ var Effect = /*#__PURE__*/_interopRequireWildcard(/*#__PURE__*/require("effect/E
 var _Function = /*#__PURE__*/require("effect/Function");
 var Option = /*#__PURE__*/_interopRequireWildcard(/*#__PURE__*/require("effect/Option"));
 var Schema = /*#__PURE__*/_interopRequireWildcard(/*#__PURE__*/require("effect/Schema"));
+var AST = /*#__PURE__*/_interopRequireWildcard(/*#__PURE__*/require("effect/SchemaAST"));
 var Field = /*#__PURE__*/_interopRequireWildcard(/*#__PURE__*/require("./Field.js"));
 var FormBuilder = /*#__PURE__*/_interopRequireWildcard(/*#__PURE__*/require("./FormBuilder.js"));
 var _dirty = /*#__PURE__*/require("./internal/dirty.js");
@@ -103,6 +104,14 @@ const make = config => {
       return fieldDef.schema;
     }
     if (Field.isArrayFieldDef(fieldDef)) {
+      // If there are more parts, we need to get the nested field schema
+      if (parts.length > 1 && AST.isTypeLiteral(fieldDef.itemSchema.ast)) {
+        const nestedFieldName = parts[1].replace(/\[\d+\]$/, "");
+        const prop = fieldDef.itemSchema.ast.propertySignatures.find(p => p.name === nestedFieldName);
+        if (prop) {
+          return Schema.make(prop.type);
+        }
+      }
       return fieldDef.itemSchema;
     }
     return undefined;

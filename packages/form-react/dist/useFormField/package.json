@@ -1,6 +1,0 @@
-{
-  "main": "../dist/cjs/useFormField.js",
-  "module": "../dist/esm/useFormField.js",
-  "types": "../dist/dts/useFormField.d.ts",
-  "sideEffects": []
-}

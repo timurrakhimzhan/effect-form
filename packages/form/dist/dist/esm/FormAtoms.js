@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import { pipe } from "effect/Function";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as AST from "effect/SchemaAST";
 import * as Field from "./Field.js";
 import * as FormBuilder from "./FormBuilder.js";
 import { recalculateDirtyFieldsForArray, recalculateDirtySubtree } from "./internal/dirty.js";
@@ -77,6 +78,14 @@ export const make = config => {
       return fieldDef.schema;
     }
     if (Field.isArrayFieldDef(fieldDef)) {
+      // If there are more parts, we need to get the nested field schema
+      if (parts.length > 1 && AST.isTypeLiteral(fieldDef.itemSchema.ast)) {
+        const nestedFieldName = parts[1].replace(/\[\d+\]$/, "");
+        const prop = fieldDef.itemSchema.ast.propertySignatures.find(p => p.name === nestedFieldName);
+        if (prop) {
+          return Schema.make(prop.type);
+        }
+      }
       return fieldDef.itemSchema;
     }
     return undefined;
