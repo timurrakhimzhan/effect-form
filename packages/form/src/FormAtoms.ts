@@ -1,14 +1,16 @@
 import * as Atom from "@effect-atom/atom/Atom"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import { pipe } from "effect/Function"
 import * as Option from "effect/Option"
-import type * as ParseResult from "effect/ParseResult"
+import * as ParseResult from "effect/ParseResult"
 import * as Schema from "effect/Schema"
 import * as Field from "./Field.js"
 import * as FormBuilder from "./FormBuilder.js"
 import { recalculateDirtyFieldsForArray, recalculateDirtySubtree } from "./internal/dirty.js"
 import { createWeakRegistry, type WeakRegistry } from "./internal/weak-registry.js"
-import { getNestedValue, setNestedValue } from "./Path.js"
+import * as Mode from "./Mode.js"
+import { getNestedValue, isPathOrParentDirty, setNestedValue } from "./Path.js"
 import * as Validation from "./Validation.js"
 
 export interface FieldAtoms {
@@ -16,6 +18,39 @@ export interface FieldAtoms {
   readonly initialValueAtom: Atom.Atom<unknown>
   readonly touchedAtom: Atom.Writable<boolean, boolean>
   readonly errorAtom: Atom.Atom<Option.Option<Validation.ErrorEntry>>
+  readonly visibleErrorAtom: Atom.Atom<Option.Option<string>>
+  readonly isValidatingAtom: Atom.Atom<boolean>
+  readonly triggerValidationAtom: Atom.AtomResultFn<unknown, void, ParseResult.ParseError>
+  readonly onChangeAtom: Atom.Writable<void, unknown>
+  readonly onBlurAtom: Atom.Writable<void, void>
+}
+
+/**
+ * Public interface for accessing all atoms related to a field.
+ * Use this when you need to subscribe to or interact with field state
+ * outside of the generated field components.
+ */
+export interface PublicFieldAtoms<S> {
+  /** The current value of the field (None if form not initialized) */
+  readonly value: Atom.Atom<Option.Option<S>>
+  /** The initial value the field was initialized with */
+  readonly initialValue: Atom.Atom<Option.Option<S>>
+  /** The visible error message (respects validation mode) */
+  readonly error: Atom.Atom<Option.Option<string>>
+  /** Whether the field has been touched (blurred) */
+  readonly isTouched: Atom.Atom<boolean>
+  /** Whether the field value differs from initial value */
+  readonly isDirty: Atom.Atom<boolean>
+  /** Whether async validation is in progress */
+  readonly isValidating: Atom.Atom<boolean>
+  /** Programmatically set the field value */
+  readonly setValue: Atom.Writable<void, S | ((prev: S) => S)>
+  /** Trigger onChange handler (sets value + triggers validation based on mode) */
+  readonly onChange: Atom.Writable<void, S>
+  /** Trigger onBlur handler (sets touched + triggers validation if mode is onBlur) */
+  readonly onBlur: Atom.Writable<void, void>
+  /** The field's path/key */
+  readonly key: string
 }
 
 export interface FormAtomsConfig<TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = void> {
@@ -29,6 +64,8 @@ export interface FormAtomsConfig<TFields extends Field.FieldsRecord, R, A, E, Su
       readonly get: Atom.FnContext
     },
   ) => A | Effect.Effect<A, E, R>
+  readonly mode?: Mode.FormMode
+  readonly validationDebounceMs?: number
 }
 
 export type FieldRefs<TFields extends Field.FieldsRecord> = {
@@ -82,6 +119,25 @@ export interface FormAtoms<TFields extends Field.FieldsRecord, R, A = void, E = 
   readonly getFieldAtom: <S>(field: FormBuilder.FieldRef<S>) => Atom.Atom<Option.Option<S>>
 
   /**
+   * Get all atoms for a field, allowing you to subscribe to or interact with
+   * any aspect of the field state outside of the generated field components.
+   *
+   * @example
+   * ```tsx
+   * const emailField = form.getField(form.fields.email)
+   *
+   * // Subscribe to individual atoms
+   * const error = useAtomValue(emailField.error)
+   * const isDirty = useAtomValue(emailField.isDirty)
+   *
+   * // Programmatically update
+   * const setEmail = useAtomSet(emailField.setValue)
+   * setEmail("new@email.com")
+   * ```
+   */
+  readonly getField: <S>(field: FormBuilder.FieldRef<S>) => PublicFieldAtoms<S>
+
+  /**
    * Root anchor atom for the form's dependency graph.
    * Mount this atom to keep all form state alive even when field components unmount.
    *
@@ -102,6 +158,49 @@ export interface FormAtoms<TFields extends Field.FieldsRecord, R, A = void, E = 
   readonly mountAtom: Atom.Atom<void>
 
   readonly keepAliveActiveAtom: Atom.Writable<boolean, boolean>
+
+  /**
+   * Initialize the form with default values.
+   * Safe to call multiple times - will only initialize if not already initialized
+   * (unless keepAliveActive is false, in which case it will reinitialize).
+   */
+  readonly initializeAtom: Atom.Writable<void, Field.EncodedFromFields<TFields>>
+
+  /**
+   * The parsed mode configuration for this form.
+   */
+  readonly parsedMode: Mode.ParsedMode
+
+  /**
+   * Trigger auto-submit for onBlur mode.
+   * Call this atom on field blur to trigger auto-submit.
+   */
+  readonly triggerAutoSubmitOnBlurAtom: Atom.Writable<void, void>
+
+  /**
+   * Trigger auto-submit for onChange mode.
+   * Call this on every state change - it handles value tracking internally.
+   */
+  readonly triggerAutoSubmitOnChangeAtom: Atom.Writable<void, void>
+
+  /**
+   * Flush pending auto-submit when submit completes.
+   * Pass the previous wasSubmitting state to detect transitions.
+   */
+  readonly flushAutoSubmitPendingAtom: Atom.Writable<void, boolean>
+
+  /**
+   * Flag indicating auto-submit is ready to fire.
+   * React should subscribe to this and call submitAtom when it becomes true.
+   */
+  readonly autoSubmitReadyAtom: Atom.Writable<boolean, boolean>
+
+  /**
+   * Counter tracking unique auto-submit requests.
+   * React uses this to detect when a new auto-submit should happen.
+   */
+  readonly autoSubmitRequestIdAtom: Atom.Atom<number>
+  readonly isAutoSubmitDebouncingAtom: Atom.Atom<boolean>
 }
 
 export interface FormOperations<TFields extends Field.FieldsRecord> {
@@ -163,6 +262,8 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
 ): FormAtoms<TFields, R, A, E, SubmitArgs> => {
   const { formBuilder, runtime } = config
   const { fields } = formBuilder
+  const parsedMode = Mode.parse(config.mode)
+  const debounceMs = config.validationDebounceMs ?? parsedMode.debounce ?? 0
 
   const combinedSchema = FormBuilder.buildSchema(formBuilder)
 
@@ -248,9 +349,62 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
     return validationAtom
   }
 
+  const getFieldSchema = (fieldPath: string): Schema.Schema.Any | undefined => {
+    const parts = fieldPath.split(".")
+    const rootFieldName = parts[0].replace(/\[\d+\]$/, "")
+    const fieldDef = fields[rootFieldName]
+    if (!fieldDef) return undefined
+
+    if (Field.isFieldDef(fieldDef)) {
+      return fieldDef.schema
+    }
+
+    if (Field.isArrayFieldDef(fieldDef)) {
+      return fieldDef.itemSchema
+    }
+
+    return undefined
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Auto-Submit atoms (defined before getOrCreateFieldAtoms so they're in scope)
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Track pending changes while a submit is in progress
+  const autoSubmitPendingAtom = Atom.make(false).pipe(Atom.setIdleTTL(0))
+
+  // Flag set when debounced auto-submit should trigger
+  const autoSubmitReadyAtom = Atom.make(false).pipe(Atom.setIdleTTL(0))
+  // Counter to track unique auto-submit requests (for React to detect changes)
+  const autoSubmitRequestIdAtom = Atom.make(0).pipe(Atom.setIdleTTL(0))
+
+  // Debounced auto-submit - sets the ready flag after debounce
+  // Uses number parameter to ensure each call creates a new fiber (like triggerValidationAtom)
+  const debouncedAutoSubmitAtom = runtime.fn<number>()((_requestId: number, get) =>
+    Effect.gen(function*() {
+      if (debounceMs > 0) {
+        yield* Effect.sleep(Duration.millis(debounceMs))
+      }
+      yield* Effect.sync(() => {
+        get.set(autoSubmitReadyAtom, true)
+        get.set(autoSubmitRequestIdAtom, get(autoSubmitRequestIdAtom) + 1)
+      })
+    })
+  ).pipe(Atom.setIdleTTL(0)) as Atom.AtomResultFn<number, void, never>
+
+  // Counter for auto-submit requests
+  let autoSubmitCounter = 0
+
+  // Atom to keep debouncedAutoSubmitAtom alive by subscribing to it
+  const isAutoSubmitDebouncing = Atom.readable((get) => {
+    const result = get(debouncedAutoSubmitAtom)
+    return result.waiting
+  }).pipe(Atom.setIdleTTL(0))
+
   const getOrCreateFieldAtoms = (fieldPath: string): FieldAtoms => {
     const existing = fieldAtomsRegistry.get(fieldPath)
     if (existing) return existing
+
+    const fieldSchema = getFieldSchema(fieldPath)
 
     const valueAtom = Atom.writable(
       (get) => getNestedValue(Option.getOrThrow(get(stateAtom)).values, fieldPath),
@@ -284,7 +438,137 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
       return entry ? Option.some(entry) : Option.none<Validation.ErrorEntry>()
     }).pipe(Atom.setIdleTTL(0))
 
-    const atoms: FieldAtoms = { valueAtom, initialValueAtom, touchedAtom, errorAtom }
+    // Debounced validation that writes results to errorsAtom
+    const triggerValidationAtom = fieldSchema
+      ? runtime.fn<unknown>()((value: unknown, get) =>
+        Effect.gen(function*() {
+          // Debounce
+          if (debounceMs > 0) {
+            yield* Effect.sleep(Duration.millis(debounceMs))
+          }
+
+          yield* pipe(
+            Schema.decodeUnknown(fieldSchema)(value) as Effect.Effect<unknown, ParseResult.ParseError, R>,
+            Effect.tap(() =>
+              Effect.sync(() => {
+                // Clear field-sourced error on success (keep refinement errors until re-submit)
+                const currentErrors = get(errorsAtom)
+                const existingError = currentErrors.get(fieldPath)
+                if (existingError && existingError.source === "field") {
+                  const newErrors = new Map(currentErrors)
+                  newErrors.delete(fieldPath)
+                  get.set(errorsAtom, newErrors)
+                }
+              })
+            ),
+            Effect.tapError((parseError) =>
+              Effect.sync(() => {
+                // Extract first error and set for this field
+                const errorMessage = Validation.extractFirstError(parseError)
+                if (Option.isSome(errorMessage)) {
+                  const currentErrors = get(errorsAtom)
+                  const newErrors = new Map(currentErrors)
+                  newErrors.set(fieldPath, { message: errorMessage.value, source: "field" as const })
+                  get.set(errorsAtom, newErrors)
+                }
+              })
+            ),
+            Effect.asVoid,
+          )
+        })
+      ).pipe(Atom.setIdleTTL(0)) as Atom.AtomResultFn<unknown, void, ParseResult.ParseError>
+      : runtime.fn<unknown>()(() => Effect.void).pipe(Atom.setIdleTTL(0)) as Atom.AtomResultFn<
+        unknown,
+        void,
+        ParseResult.ParseError
+      >
+
+    const isValidatingAtom = Atom.readable((get) => {
+      const result = get(triggerValidationAtom)
+      return result.waiting
+    }).pipe(Atom.setIdleTTL(0))
+
+    // Computed visible error based on mode, touched, dirty, submitCount
+    const visibleErrorAtom = Atom.readable((get) => {
+      const error = get(errorAtom)
+      if (Option.isNone(error)) return Option.none<string>()
+
+      const touched = get(touchedAtom)
+      const submitCount = get(submitCountAtom)
+      const dirtyFields = get(dirtyFieldsAtom)
+      const isDirty = isPathOrParentDirty(dirtyFields, fieldPath)
+
+      const shouldShow = parsedMode.validation === "onSubmit"
+        ? submitCount > 0
+        : parsedMode.validation === "onBlur"
+        ? (touched || submitCount > 0)
+        : (isDirty || submitCount > 0)
+
+      if (!shouldShow) return Option.none<string>()
+
+      return Option.some(error.value.message)
+    }).pipe(Atom.setIdleTTL(0))
+
+    // onChange handler: sets value, triggers validation, and triggers auto-submit based on mode
+    const onChangeAtom = Atom.fnSync<unknown>()((value: unknown, get) => {
+      // Set value
+      const currentState = Option.getOrThrow(get(stateAtom))
+      const newState = operations.setFieldValue(currentState, fieldPath, value)
+      get.set(stateAtom, Option.some(newState))
+
+      // Trigger validation based on mode
+      const touched = get(touchedAtom)
+      const submitCount = get(submitCountAtom)
+      const shouldValidate = parsedMode.validation === "onChange" ||
+        (parsedMode.validation === "onBlur" && touched) ||
+        (parsedMode.validation === "onSubmit" && submitCount > 0)
+
+      if (shouldValidate) {
+        get.set(triggerValidationAtom, value)
+      }
+
+      // Trigger auto-submit for onChange mode (debounced)
+      if (parsedMode.autoSubmit && parsedMode.validation === "onChange") {
+        const submitResult = get(submitAtom)
+        if (submitResult.waiting) {
+          get.set(autoSubmitPendingAtom, true)
+        } else {
+          autoSubmitCounter++
+          get.set(debouncedAutoSubmitAtom, autoSubmitCounter)
+        }
+      }
+    }, { initialValue: undefined as void }).pipe(Atom.setIdleTTL(0))
+
+    // onBlur handler: sets touched and triggers validation if mode is onBlur
+    const onBlurAtom = Atom.fnSync<void>()((_: void, get) => {
+      // Set touched
+      const currentState = Option.getOrThrow(get(stateAtom))
+      get.set(
+        stateAtom,
+        Option.some({
+          ...currentState,
+          touched: setNestedValue(currentState.touched, fieldPath, true),
+        } as FormBuilder.FormState<TFields>),
+      )
+
+      // Trigger validation if mode is onBlur
+      if (parsedMode.validation === "onBlur") {
+        const value = getNestedValue(currentState.values, fieldPath)
+        get.set(triggerValidationAtom, value)
+      }
+    }, { initialValue: undefined as void }).pipe(Atom.setIdleTTL(0))
+
+    const atoms: FieldAtoms = {
+      valueAtom,
+      initialValueAtom,
+      touchedAtom,
+      errorAtom,
+      visibleErrorAtom,
+      isValidatingAtom,
+      triggerValidationAtom,
+      onChangeAtom,
+      onBlurAtom,
+    }
     fieldAtomsRegistry.set(fieldPath, atoms)
     return atoms
   }
@@ -539,6 +823,59 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
     return safeAtom
   }
 
+  const publicFieldAtomsRegistry = createWeakRegistry<PublicFieldAtoms<unknown>>()
+
+  const getField = <S>(field: FormBuilder.FieldRef<S>): PublicFieldAtoms<S> => {
+    const existing = publicFieldAtomsRegistry.get(field.key)
+    if (existing) return existing as PublicFieldAtoms<S>
+
+    const fieldAtoms = getOrCreateFieldAtoms(field.key)
+
+    // Safe value atom (returns None if form not initialized)
+    const valueAtom = Atom.readable((get) =>
+      Option.map(get(stateAtom), (state) => getNestedValue(state.values, field.key) as S)
+    ).pipe(Atom.setIdleTTL(0))
+
+    // Safe initial value atom
+    const initialValueAtom = Atom.readable((get) =>
+      Option.map(get(stateAtom), (state) => getNestedValue(state.initialValues, field.key) as S)
+    ).pipe(Atom.setIdleTTL(0))
+
+    // isDirty computed atom
+    const isDirtyAtom = Atom.readable((get) =>
+      isPathOrParentDirty(get(dirtyFieldsAtom), field.key)
+    ).pipe(Atom.setIdleTTL(0))
+
+    // Safe isTouched (false if form not initialized)
+    const isTouchedAtom = Atom.readable((get) => {
+      const state = get(stateAtom)
+      if (Option.isNone(state)) return false
+      return (getNestedValue(state.value.touched, field.key) ?? false) as boolean
+    }).pipe(Atom.setIdleTTL(0))
+
+    // Typed onChange atom
+    const typedOnChangeAtom = Atom.writable(
+      () => undefined as void,
+      (ctx, value: S) => ctx.set(fieldAtoms.onChangeAtom, value)
+    ).pipe(Atom.setIdleTTL(0))
+
+    const result: PublicFieldAtoms<S> = {
+      value: valueAtom,
+      initialValue: initialValueAtom,
+      error: fieldAtoms.visibleErrorAtom,
+      isTouched: isTouchedAtom,
+      isDirty: isDirtyAtom,
+      isValidating: fieldAtoms.isValidatingAtom,
+      setValue: setValue(field),
+      onChange: typedOnChangeAtom,
+      onBlur: fieldAtoms.onBlurAtom,
+      key: field.key,
+    }
+
+    publicFieldAtomsRegistry.set(field.key, result as PublicFieldAtoms<unknown>)
+    return result
+  }
+
   const mountAtom = Atom.readable((get) => {
     get(stateAtom)
     get(errorsAtom)
@@ -546,6 +883,85 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
   }).pipe(Atom.setIdleTTL(0))
 
   const keepAliveActiveAtom = Atom.make(false).pipe(Atom.setIdleTTL(0))
+
+  // Initialize atom - sets initial state if not already initialized (respects keepAlive)
+  const initializeAtom = Atom.fnSync<Field.EncodedFromFields<TFields>>()((defaultValues, get) => {
+    const isKeptAlive = get(keepAliveActiveAtom)
+    const currentState = get(stateAtom)
+
+    if (!isKeptAlive) {
+      // Not in keepAlive mode - always initialize
+      get.set(stateAtom, Option.some(operations.createInitialState(defaultValues)))
+    } else if (Option.isNone(currentState)) {
+      // In keepAlive mode but no state yet - initialize
+      get.set(stateAtom, Option.some(operations.createInitialState(defaultValues)))
+    }
+    // Otherwise: keepAlive is active and state exists - do nothing
+  }, { initialValue: undefined as void }).pipe(Atom.setIdleTTL(0))
+
+
+  // Trigger auto-submit for onBlur mode (call this on field blur)
+  const triggerAutoSubmitOnBlurAtom = Atom.fnSync<void>()((_: void, get) => {
+    if (!parsedMode.autoSubmit || parsedMode.validation !== "onBlur") return
+
+    const state = get(stateAtom)
+    if (Option.isNone(state)) return
+
+    const { values, lastSubmittedValues } = state.value
+
+    // Skip if values match last submitted
+    if (Option.isSome(lastSubmittedValues) && values === lastSubmittedValues.value.encoded) return
+
+    get.set(submitAtom, undefined as SubmitArgs)
+  }, { initialValue: undefined as void }).pipe(Atom.setIdleTTL(0))
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Auto-Submit coordination atoms
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  // Track the last values reference to detect actual value changes (for React subscription)
+  const autoSubmitLastValuesAtom = Atom.make<unknown>(null).pipe(Atom.setIdleTTL(0))
+
+  // Called on every state change from React - handles value tracking and submit triggering
+  const triggerAutoSubmitOnChangeAtom = Atom.fnSync<void>()((_: void, get) => {
+    if (!parsedMode.autoSubmit || parsedMode.validation !== "onChange") return
+
+    const state = get(stateAtom)
+    if (Option.isNone(state)) return
+
+    const currentValues = state.value.values
+    const lastValues = get(autoSubmitLastValuesAtom)
+
+    // Reference equality check - skip if values haven't changed
+    if (currentValues === lastValues) return
+    get.set(autoSubmitLastValuesAtom, currentValues)
+
+    const submitResult = get(submitAtom)
+    if (submitResult.waiting) {
+      get.set(autoSubmitPendingAtom, true)
+    } else {
+      autoSubmitCounter++
+      get.set(debouncedAutoSubmitAtom, autoSubmitCounter)
+    }
+  }, { initialValue: undefined as void }).pipe(Atom.setIdleTTL(0))
+
+  // Called when submit completes to flush pending auto-submit
+  const flushAutoSubmitPendingAtom = Atom.fnSync<boolean>()((wasSubmitting: boolean, get) => {
+    if (!parsedMode.autoSubmit || parsedMode.validation !== "onChange") return
+
+    const submitResult = get(submitAtom)
+    const isSubmitting = submitResult.waiting
+
+    // Only flush when transitioning from submitting to not submitting
+    if (wasSubmitting && !isSubmitting) {
+      const pending = get(autoSubmitPendingAtom)
+      if (pending) {
+        get.set(autoSubmitPendingAtom, false)
+        autoSubmitCounter++
+        get.set(debouncedAutoSubmitAtom, autoSubmitCounter)
+      }
+    }
+  }, { initialValue: undefined as void }).pipe(Atom.setIdleTTL(0))
 
   return {
     stateAtom,
@@ -572,7 +988,16 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
     setValuesAtom,
     setValue,
     getFieldAtom,
+    getField,
     mountAtom,
     keepAliveActiveAtom,
+    initializeAtom,
+    parsedMode,
+    triggerAutoSubmitOnBlurAtom,
+    triggerAutoSubmitOnChangeAtom,
+    flushAutoSubmitPendingAtom,
+    autoSubmitReadyAtom,
+    autoSubmitRequestIdAtom,
+    isAutoSubmitDebouncingAtom: isAutoSubmitDebouncing,
   } as FormAtoms<TFields, R, A, E, SubmitArgs>
 }
