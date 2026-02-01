@@ -507,6 +507,52 @@ const make = config => {
     }).pipe(Atom.setIdleTTL(0));
     // Typed onChange atom
     const typedOnChangeAtom = Atom.writable(() => undefined, (ctx, value) => ctx.set(fieldAtoms.onChangeAtom, value)).pipe(Atom.setIdleTTL(0));
+    // Manual validation - bypasses debounce, validates immediately
+    const fieldSchema = getFieldSchema(field.key);
+    const validateAtom = runtime.fn()((_, get) => Effect.gen(function* () {
+      const state = get(stateAtom);
+      if (Option.isNone(state)) {
+        return Option.none();
+      }
+      // No schema = always valid
+      if (!fieldSchema) {
+        return Option.some({
+          isValid: true,
+          error: Option.none()
+        });
+      }
+      const value = (0, _Path.getNestedValue)(state.value.values, field.key);
+      // Validate without debounce
+      const result = yield* (0, _Function.pipe)(Schema.decodeUnknown(fieldSchema)(value), Effect.tap(() => Effect.sync(() => {
+        // Clear field error on success
+        const currentErrors = get(errorsAtom);
+        const existingError = currentErrors.get(field.key);
+        if (existingError && existingError.source === "field") {
+          const newErrors = new Map(currentErrors);
+          newErrors.delete(field.key);
+          get.set(errorsAtom, newErrors);
+        }
+      })), Effect.map(() => Option.some({
+        isValid: true,
+        error: Option.none()
+      })), Effect.catchTag("ParseError", parseError => Effect.sync(() => {
+        const errorMessage = Validation.extractFirstError(parseError);
+        if (Option.isSome(errorMessage)) {
+          const currentErrors = get(errorsAtom);
+          const newErrors = new Map(currentErrors);
+          newErrors.set(field.key, {
+            message: errorMessage.value,
+            source: "field"
+          });
+          get.set(errorsAtom, newErrors);
+        }
+        return Option.some({
+          isValid: false,
+          error: errorMessage
+        });
+      })));
+      return result;
+    })).pipe(Atom.setIdleTTL(0));
     const result = {
       value: valueAtom,
       initialValue: initialValueAtom,
@@ -517,6 +563,7 @@ const make = config => {
       setValue: setValue(field),
       onChange: typedOnChangeAtom,
       onBlur: fieldAtoms.onBlurAtom,
+      validate: validateAtom,
       key: field.key
     };
     publicFieldAtomsRegistry.set(field.key, result);
@@ -536,7 +583,7 @@ const make = config => {
     // Safe initial value atom
     const initialValueAtom = Atom.readable(get => Option.map(get(stateAtom), state => (0, _Path.getNestedValue)(state.initialValues, field.key))).pipe(Atom.setIdleTTL(0));
     // Touched state for each item
-    const touchedAtom = Atom.readable(get => Option.map(get(stateAtom), state => (0, _Path.getNestedValue)(state.touched, field.key) ?? [])).pipe(Atom.setIdleTTL(0));
+    const touchedAtom = Atom.readable(get => Option.map(get(stateAtom), state => (0, _Path.getNestedValue)(state.touched, field.key) ?? false)).pipe(Atom.setIdleTTL(0));
     // isDirty computed atom
     const isDirtyAtom = Atom.readable(get => (0, _Path.isPathOrParentDirty)(get(dirtyFieldsAtom), field.key)).pipe(Atom.setIdleTTL(0));
     // Append operation
@@ -586,6 +633,45 @@ const make = config => {
       const arrayValue = (0, _Path.getNestedValue)(newState.values, field.key);
       ctx.set(fieldAtoms.triggerValidationAtom, arrayValue);
     }).pipe(Atom.setIdleTTL(0));
+    // Manual validation - bypasses debounce, validates immediately
+    const arraySchema = fieldDef.arraySchema;
+    const validateAtom = runtime.fn()((_, get) => Effect.gen(function* () {
+      const state = get(stateAtom);
+      if (Option.isNone(state)) {
+        return Option.none();
+      }
+      const value = (0, _Path.getNestedValue)(state.value.values, field.key);
+      // Validate without debounce
+      const result = yield* (0, _Function.pipe)(Schema.decodeUnknown(arraySchema)(value), Effect.tap(() => Effect.sync(() => {
+        // Clear field error on success
+        const currentErrors = get(errorsAtom);
+        const existingError = currentErrors.get(field.key);
+        if (existingError && existingError.source === "field") {
+          const newErrors = new Map(currentErrors);
+          newErrors.delete(field.key);
+          get.set(errorsAtom, newErrors);
+        }
+      })), Effect.map(() => Option.some({
+        isValid: true,
+        error: Option.none()
+      })), Effect.catchTag("ParseError", parseError => Effect.sync(() => {
+        const errorMessage = Validation.extractFirstError(parseError);
+        if (Option.isSome(errorMessage)) {
+          const currentErrors = get(errorsAtom);
+          const newErrors = new Map(currentErrors);
+          newErrors.set(field.key, {
+            message: errorMessage.value,
+            source: "field"
+          });
+          get.set(errorsAtom, newErrors);
+        }
+        return Option.some({
+          isValid: false,
+          error: errorMessage
+        });
+      })));
+      return result;
+    })).pipe(Atom.setIdleTTL(0));
     const result = {
       value: valueAtom,
       initialValue: initialValueAtom,
@@ -594,6 +680,7 @@ const make = config => {
       isDirty: isDirtyAtom,
       isValidating: fieldAtoms.isValidatingAtom,
       key: field.key,
+      validate: validateAtom,
       append: appendAtom,
       remove: removeAtom,
       swap: swapAtom,
@@ -629,8 +716,8 @@ const make = config => {
     const state = get(stateAtom);
     if (Option.isNone(state)) return;
     const {
-      values,
-      lastSubmittedValues
+      lastSubmittedValues,
+      values
     } = state.value;
     // Skip if values match last submitted
     if (Option.isSome(lastSubmittedValues) && values === lastSubmittedValues.value.encoded) return;

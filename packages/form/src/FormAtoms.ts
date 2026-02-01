@@ -3,7 +3,7 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import { pipe } from "effect/Function"
 import * as Option from "effect/Option"
-import * as ParseResult from "effect/ParseResult"
+import type * as ParseResult from "effect/ParseResult"
 import * as Schema from "effect/Schema"
 import * as AST from "effect/SchemaAST"
 import * as Field from "./Field.js"
@@ -50,6 +50,8 @@ export interface PublicFieldAtoms<S> {
   readonly onChange: Atom.Writable<void, S>
   /** Trigger onBlur handler (sets touched + triggers validation if mode is onBlur) */
   readonly onBlur: Atom.Writable<void, void>
+  /** Manually trigger validation and get the result. Returns None if form not initialized. */
+  readonly validate: Atom.AtomResultFn<void, Option.Option<ValidationResult>, never>
   /** The field's path/key */
   readonly key: string
 }
@@ -57,9 +59,16 @@ export interface PublicFieldAtoms<S> {
 /**
  * Touched state for an array item - maps field names to booleans
  */
-export type ArrayItemTouched<S> = S extends Record<string, unknown>
-  ? { readonly [K in keyof S]?: boolean }
+export type ArrayItemTouched<S> = S extends Record<string, unknown> ? { readonly [K in keyof S]?: boolean }
   : boolean
+
+/**
+ * Result of manual field validation
+ */
+export interface ValidationResult {
+  readonly isValid: boolean
+  readonly error: Option.Option<string>
+}
 
 /**
  * Public interface for accessing atoms related to an array field.
@@ -73,7 +82,7 @@ export interface PublicArrayFieldAtoms<S> {
   /** The visible error message for the array itself (e.g., minItems validation) */
   readonly error: Atom.Atom<Option.Option<string>>
   /** Touched state for each item in the array */
-  readonly touched: Atom.Atom<Option.Option<ReadonlyArray<ArrayItemTouched<S>>>>
+  readonly touched: Atom.Atom<Option.Option<boolean | ReadonlyArray<ArrayItemTouched<S>>>>
   /** Whether the array field is dirty (any item changed) */
   readonly isDirty: Atom.Atom<boolean>
   /** Whether async validation is in progress for the array */
@@ -88,6 +97,8 @@ export interface PublicArrayFieldAtoms<S> {
   readonly swap: Atom.Writable<void, { indexA: number; indexB: number }>
   /** Move an item from one index to another */
   readonly move: Atom.Writable<void, { from: number; to: number }>
+  /** Manually trigger validation and get the result. Returns None if form not initialized. */
+  readonly validate: Atom.AtomResultFn<void, Option.Option<ValidationResult>, never>
 }
 
 export interface FormAtomsConfig<TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = void> {
@@ -108,8 +119,7 @@ export interface FormAtomsConfig<TFields extends Field.FieldsRecord, R, A, E, Su
 export type FieldRefs<TFields extends Field.FieldsRecord> = {
   readonly [K in keyof TFields]: TFields[K] extends Field.FieldDef<any, infer S> ?
     FormBuilder.FieldRef<Schema.Schema.Encoded<S>>
-    : TFields[K] extends Field.ArrayFieldDef<any, infer S, any> ?
-      FormBuilder.ArrayFieldRef<Schema.Schema.Encoded<S>>
+    : TFields[K] extends Field.ArrayFieldDef<any, infer S, any> ? FormBuilder.ArrayFieldRef<Schema.Schema.Encoded<S>>
     : never
 }
 
@@ -151,7 +161,12 @@ export interface FormAtoms<TFields extends Field.FieldsRecord, R, A = void, E = 
   readonly resetAtom: Atom.Writable<void, void>
   readonly revertToLastSubmitAtom: Atom.Writable<void, void>
   readonly setValuesAtom: Atom.Writable<void, Field.EncodedFromFields<TFields>>
-  readonly setValue: <S>(field: FormBuilder.FieldRef<S> | FormBuilder.ArrayFieldRef<S>) => Atom.Writable<void, S | ((prev: S) => S)>
+  readonly setValue: {
+    <S>(field: FormBuilder.FieldRef<S>): Atom.Writable<void, S | ((prev: S) => S)>
+    <S>(
+      field: FormBuilder.ArrayFieldRef<S>,
+    ): Atom.Writable<void, ReadonlyArray<S> | ((prev: ReadonlyArray<S>) => ReadonlyArray<S>)>
+  }
 
   readonly getFieldAtom: {
     <S>(field: FormBuilder.FieldRef<S>): Atom.Atom<Option.Option<S>>
@@ -431,7 +446,7 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
       if (parts.length > 1 && AST.isTypeLiteral(fieldDef.itemSchema.ast)) {
         const nestedFieldName = parts[1].replace(/\[\d+\]$/, "")
         const prop = fieldDef.itemSchema.ast.propertySignatures.find(
-          (p) => p.name === nestedFieldName
+          (p) => p.name === nestedFieldName,
         )
         if (prop) {
           return Schema.make(prop.type)
@@ -899,7 +914,9 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
 
   const setValueAtomsRegistry = createWeakRegistry<Atom.Writable<void, any>>()
 
-  const setValue = <S>(field: FormBuilder.FieldRef<S> | FormBuilder.ArrayFieldRef<S>): Atom.Writable<void, S | ((prev: S) => S)> => {
+  const setValue = <S>(
+    field: FormBuilder.FieldRef<S> | FormBuilder.ArrayFieldRef<S>,
+  ): Atom.Writable<void, S | ((prev: S) => S)> => {
     const cached = setValueAtomsRegistry.get(field.key)
     if (cached) return cached
 
@@ -923,7 +940,9 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
   const getFieldAtom: {
     <S>(field: FormBuilder.FieldRef<S>): Atom.Atom<Option.Option<S>>
     <S>(field: FormBuilder.ArrayFieldRef<S>): Atom.Atom<Option.Option<ReadonlyArray<S>>>
-  } = <S>(field: FormBuilder.FieldRef<S> | FormBuilder.ArrayFieldRef<S>): Atom.Atom<Option.Option<S | ReadonlyArray<S>>> => {
+  } = <S>(
+    field: FormBuilder.FieldRef<S> | FormBuilder.ArrayFieldRef<S>,
+  ): Atom.Atom<Option.Option<S | ReadonlyArray<S>>> => {
     const existing = publicFieldAtomRegistry.get(field.key)
     if (existing) return existing as Atom.Atom<Option.Option<S>>
 
@@ -954,9 +973,9 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
     ).pipe(Atom.setIdleTTL(0))
 
     // isDirty computed atom
-    const isDirtyAtom = Atom.readable((get) =>
-      isPathOrParentDirty(get(dirtyFieldsAtom), field.key)
-    ).pipe(Atom.setIdleTTL(0))
+    const isDirtyAtom = Atom.readable((get) => isPathOrParentDirty(get(dirtyFieldsAtom), field.key)).pipe(
+      Atom.setIdleTTL(0),
+    )
 
     // Safe isTouched (false if form not initialized)
     const isTouchedAtom = Atom.readable((get) => {
@@ -968,8 +987,59 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
     // Typed onChange atom
     const typedOnChangeAtom = Atom.writable(
       () => undefined as void,
-      (ctx, value: S) => ctx.set(fieldAtoms.onChangeAtom, value)
+      (ctx, value: S) => ctx.set(fieldAtoms.onChangeAtom, value),
     ).pipe(Atom.setIdleTTL(0))
+
+    // Manual validation - bypasses debounce, validates immediately
+    const fieldSchema = getFieldSchema(field.key)
+    const validateAtom = runtime.fn<void>()((_: void, get) =>
+      Effect.gen(function*() {
+        const state = get(stateAtom)
+        if (Option.isNone(state)) {
+          return Option.none<ValidationResult>()
+        }
+
+        // No schema = always valid
+        if (!fieldSchema) {
+          return Option.some({ isValid: true, error: Option.none<string>() } as ValidationResult)
+        }
+
+        const value = getNestedValue(state.value.values, field.key)
+
+        // Validate without debounce
+        const result = yield* pipe(
+          Schema.decodeUnknown(fieldSchema)(value) as Effect.Effect<unknown, ParseResult.ParseError, R>,
+          Effect.tap(() =>
+            Effect.sync(() => {
+              // Clear field error on success
+              const currentErrors = get(errorsAtom)
+              const existingError = currentErrors.get(field.key)
+              if (existingError && existingError.source === "field") {
+                const newErrors = new Map(currentErrors)
+                newErrors.delete(field.key)
+                get.set(errorsAtom, newErrors)
+              }
+            })
+          ),
+          Effect.map(() => Option.some({ isValid: true, error: Option.none<string>() } as ValidationResult)),
+          Effect.catchTag("ParseError", (parseError) =>
+            Effect.sync(() => {
+              const errorMessage = Validation.extractFirstError(parseError)
+              if (Option.isSome(errorMessage)) {
+                const currentErrors = get(errorsAtom)
+                const newErrors = new Map(currentErrors)
+                newErrors.set(field.key, { message: errorMessage.value, source: "field" as const })
+                get.set(errorsAtom, newErrors)
+              }
+              return Option.some({
+                isValid: false,
+                error: errorMessage,
+              } as ValidationResult)
+            })),
+        )
+        return result
+      })
+    ).pipe(Atom.setIdleTTL(0)) as Atom.AtomResultFn<void, Option.Option<ValidationResult>, never>
 
     const result: PublicFieldAtoms<S> = {
       value: valueAtom,
@@ -981,6 +1051,7 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
       setValue: setValue(field),
       onChange: typedOnChangeAtom,
       onBlur: fieldAtoms.onBlurAtom,
+      validate: validateAtom,
       key: field.key,
     }
 
@@ -1012,15 +1083,16 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
 
     // Touched state for each item
     const touchedAtom = Atom.readable((get) =>
-      Option.map(get(stateAtom), (state) =>
-        (getNestedValue(state.touched, field.key) ?? []) as ReadonlyArray<ArrayItemTouched<S>>
+      Option.map(
+        get(stateAtom),
+        (state) => (getNestedValue(state.touched, field.key) ?? false) as boolean | ReadonlyArray<ArrayItemTouched<S>>,
       )
     ).pipe(Atom.setIdleTTL(0))
 
     // isDirty computed atom
-    const isDirtyAtom = Atom.readable((get) =>
-      isPathOrParentDirty(get(dirtyFieldsAtom), field.key)
-    ).pipe(Atom.setIdleTTL(0))
+    const isDirtyAtom = Atom.readable((get) => isPathOrParentDirty(get(dirtyFieldsAtom), field.key)).pipe(
+      Atom.setIdleTTL(0),
+    )
 
     // Append operation
     const appendAtom = Atom.writable(
@@ -1033,7 +1105,7 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
         // Trigger validation after append
         const arrayValue = getNestedValue(newState.values, field.key)
         ctx.set(fieldAtoms.triggerValidationAtom, arrayValue)
-      }
+      },
     ).pipe(Atom.setIdleTTL(0))
 
     // Remove operation
@@ -1048,7 +1120,7 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
         // Trigger validation after remove
         const arrayValue = getNestedValue(newState.values, field.key)
         ctx.set(fieldAtoms.triggerValidationAtom, arrayValue)
-      }
+      },
     ).pipe(Atom.setIdleTTL(0))
 
     // Swap operation
@@ -1062,7 +1134,7 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
         // Trigger validation after swap
         const arrayValue = getNestedValue(newState.values, field.key)
         ctx.set(fieldAtoms.triggerValidationAtom, arrayValue)
-      }
+      },
     ).pipe(Atom.setIdleTTL(0))
 
     // Move operation
@@ -1076,8 +1148,54 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
         // Trigger validation after move
         const arrayValue = getNestedValue(newState.values, field.key)
         ctx.set(fieldAtoms.triggerValidationAtom, arrayValue)
-      }
+      },
     ).pipe(Atom.setIdleTTL(0))
+
+    // Manual validation - bypasses debounce, validates immediately
+    const arraySchema = fieldDef.arraySchema
+    const validateAtom = runtime.fn<void>()((_: void, get) =>
+      Effect.gen(function*() {
+        const state = get(stateAtom)
+        if (Option.isNone(state)) {
+          return Option.none<ValidationResult>()
+        }
+
+        const value = getNestedValue(state.value.values, field.key)
+
+        // Validate without debounce
+        const result = yield* pipe(
+          Schema.decodeUnknown(arraySchema)(value) as Effect.Effect<unknown, ParseResult.ParseError, R>,
+          Effect.tap(() =>
+            Effect.sync(() => {
+              // Clear field error on success
+              const currentErrors = get(errorsAtom)
+              const existingError = currentErrors.get(field.key)
+              if (existingError && existingError.source === "field") {
+                const newErrors = new Map(currentErrors)
+                newErrors.delete(field.key)
+                get.set(errorsAtom, newErrors)
+              }
+            })
+          ),
+          Effect.map(() => Option.some({ isValid: true, error: Option.none<string>() } as ValidationResult)),
+          Effect.catchTag("ParseError", (parseError) =>
+            Effect.sync(() => {
+              const errorMessage = Validation.extractFirstError(parseError)
+              if (Option.isSome(errorMessage)) {
+                const currentErrors = get(errorsAtom)
+                const newErrors = new Map(currentErrors)
+                newErrors.set(field.key, { message: errorMessage.value, source: "field" as const })
+                get.set(errorsAtom, newErrors)
+              }
+              return Option.some({
+                isValid: false,
+                error: errorMessage,
+              } as ValidationResult)
+            })),
+        )
+        return result
+      })
+    ).pipe(Atom.setIdleTTL(0)) as Atom.AtomResultFn<void, Option.Option<ValidationResult>, never>
 
     const result: PublicArrayFieldAtoms<S> = {
       value: valueAtom,
@@ -1087,6 +1205,7 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
       isDirty: isDirtyAtom,
       isValidating: fieldAtoms.isValidatingAtom,
       key: field.key,
+      validate: validateAtom,
       append: appendAtom,
       remove: removeAtom,
       swap: swapAtom,
@@ -1120,7 +1239,6 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
     // Otherwise: keepAlive is active and state exists - do nothing
   }, { initialValue: undefined as void }).pipe(Atom.setIdleTTL(0))
 
-
   // Trigger auto-submit for onBlur mode (call this on field blur)
   const triggerAutoSubmitOnBlurAtom = Atom.fnSync<void>()((_: void, get) => {
     if (!parsedMode.autoSubmit || parsedMode.validation !== "onBlur") return
@@ -1128,7 +1246,7 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
     const state = get(stateAtom)
     if (Option.isNone(state)) return
 
-    const { values, lastSubmittedValues } = state.value
+    const { lastSubmittedValues, values } = state.value
 
     // Skip if values match last submitted
     if (Option.isSome(lastSubmittedValues) && values === lastSubmittedValues.value.encoded) return

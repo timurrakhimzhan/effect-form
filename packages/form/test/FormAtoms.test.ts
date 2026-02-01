@@ -1,5 +1,6 @@
 import * as Atom from "@effect-atom/atom/Atom"
 import * as Registry from "@effect-atom/atom/Registry"
+import * as Result from "@effect-atom/atom/Result"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
@@ -1388,7 +1389,7 @@ describe("FormAtoms", () => {
       registry.mount(atoms.initializeAtom)
       registry.set(atoms.initializeAtom, { name: "John", email: "john@test.com" })
 
-      let state = atoms.operations.setFieldValue(
+      const state = atoms.operations.setFieldValue(
         Option.getOrThrow(registry.get(atoms.stateAtom)),
         "name",
         "Jane",
@@ -1412,12 +1413,12 @@ describe("FormAtoms", () => {
       registry.mount(atoms.initializeAtom)
       registry.set(atoms.initializeAtom, { name: "John", email: "john@test.com" })
 
-      let state = atoms.operations.setFieldValue(
+      const state2 = atoms.operations.setFieldValue(
         Option.getOrThrow(registry.get(atoms.stateAtom)),
         "name",
         "Jane",
       )
-      registry.set(atoms.stateAtom, Option.some(state))
+      registry.set(atoms.stateAtom, Option.some(state2))
       expect(Option.getOrThrow(registry.get(atoms.stateAtom)).values.name).toBe("Jane")
 
       registry.set(atoms.initializeAtom, { name: "Bob", email: "bob@test.com" })
@@ -1870,7 +1871,7 @@ describe("FormAtoms", () => {
       const ItemsField = Field.makeArrayField(
         "items",
         Schema.Struct({ name: Schema.String }),
-        (schema) => schema.pipe(Schema.minItems(1, { message: () => "At least one item required" }))
+        (schema) => schema.pipe(Schema.minItems(1, { message: () => "At least one item required" })),
       )
       return FormBuilder.empty.addField(TitleField).addField(ItemsField)
     }
@@ -1937,6 +1938,317 @@ describe("FormAtoms", () => {
       const errors = registry.get(atoms.errorsAtom)
       expect(errors.has("items")).toBe(true)
       expect(errors.get("items")?.message).toBe("At least one item required")
+    })
+  })
+
+  describe("array field touched state", () => {
+    it("returns false when array field is not touched", () => {
+      const runtime = Atom.runtime(Layer.empty)
+      const ItemsField = Field.makeArrayField("items", Schema.Struct({ name: Schema.String }))
+      const formBuilder = FormBuilder.empty.addField(ItemsField)
+
+      const formAtoms = FormAtoms.make({
+        formBuilder,
+        runtime,
+        onSubmit: () => {},
+      })
+      const registry = Registry.make()
+
+      const initialState = formAtoms.operations.createInitialState({ items: [{ name: "test" }] })
+      registry.set(formAtoms.stateAtom, Option.some(initialState))
+
+      const touched = registry.get(formAtoms.getArrayField(formAtoms.fieldRefs.items).touched)
+      expect(Option.getOrThrow(touched)).toBe(false)
+    })
+
+    it("returns true when array field is touched but has no items", () => {
+      const runtime = Atom.runtime(Layer.empty)
+      const ItemsField = Field.makeArrayField("items", Schema.Struct({ name: Schema.String }))
+      const formBuilder = FormBuilder.empty.addField(ItemsField)
+
+      const formAtoms = FormAtoms.make({
+        formBuilder,
+        runtime,
+        onSubmit: () => {},
+      })
+      const registry = Registry.make()
+
+      const state = formAtoms.operations.createInitialState({ items: [{ name: "test" }] })
+      registry.set(formAtoms.stateAtom, Option.some(state))
+
+      // Remove the only item (this marks array as touched)
+      const removeAtom = formAtoms.getArrayField(formAtoms.fieldRefs.items).remove
+      registry.mount(removeAtom)
+      registry.set(removeAtom, 0)
+
+      const touched = registry.get(formAtoms.getArrayField(formAtoms.fieldRefs.items).touched)
+      expect(Option.getOrThrow(touched)).toBe(true)
+    })
+
+    it("returns per-item touched object when items exist and are touched", () => {
+      const runtime = Atom.runtime(Layer.empty)
+      const ItemsField = Field.makeArrayField("items", Schema.Struct({ name: Schema.String }))
+      const formBuilder = FormBuilder.empty.addField(ItemsField)
+
+      const formAtoms = FormAtoms.make({
+        formBuilder,
+        runtime,
+        onSubmit: () => {},
+        mode: "onBlur",
+      })
+      const registry = Registry.make()
+
+      const initialState = formAtoms.operations.createInitialState({ items: [{ name: "test" }] })
+      registry.set(formAtoms.stateAtom, Option.some(initialState))
+      registry.mount(formAtoms.stateAtom)
+
+      // Touch an item's field via onBlur
+      const fieldAtoms = formAtoms.getOrCreateFieldAtoms("items[0].name")
+      registry.mount(fieldAtoms.onBlurAtom)
+      registry.set(fieldAtoms.onBlurAtom, undefined)
+
+      const touched = registry.get(formAtoms.getArrayField(formAtoms.fieldRefs.items).touched)
+      const touchedValue = Option.getOrThrow(touched)
+      // When touching nested fields, the touched state becomes an object keyed by index
+      // (e.g., { "0": { "name": true } }) rather than an array
+      expect(typeof touchedValue).toBe("object")
+      expect(touchedValue).not.toBe(false)
+      expect(touchedValue).toEqual({ "0": { name: true } })
+    })
+  })
+
+  describe("validate atom", () => {
+    it("returns isValid: true for valid field value", async () => {
+      const runtime = Atom.runtime(Layer.empty)
+      const NameField = Field.makeField(
+        "name",
+        Schema.String.pipe(Schema.minLength(3, { message: () => "Too short" })),
+      )
+      const form = FormBuilder.empty.addField(NameField)
+      const atoms = FormAtoms.make({ runtime, formBuilder: form, onSubmit: () => {} })
+      const registry = Registry.make()
+
+      const initialState = atoms.operations.createInitialState({ name: "John" })
+      registry.set(atoms.stateAtom, Option.some(initialState))
+      registry.mount(atoms.stateAtom)
+      registry.mount(atoms.errorsAtom)
+
+      const fieldAtoms = atoms.getField(atoms.fieldRefs.name)
+      registry.mount(fieldAtoms.validate)
+      registry.set(fieldAtoms.validate, undefined)
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      const result = registry.get(fieldAtoms.validate)
+      expect(result.waiting).toBe(false)
+      const optionValue = Result.getOrThrow(result)
+      expect(Option.isSome(optionValue)).toBe(true)
+      const value = Option.getOrThrow(optionValue)
+      expect(value.isValid).toBe(true)
+      expect(Option.isNone(value.error)).toBe(true)
+    })
+
+    it("returns isValid: false with error for invalid field value", async () => {
+      const runtime = Atom.runtime(Layer.empty)
+      const NameField = Field.makeField(
+        "name",
+        Schema.String.pipe(Schema.minLength(5, { message: () => "Too short" })),
+      )
+      const form = FormBuilder.empty.addField(NameField)
+      const atoms = FormAtoms.make({ runtime, formBuilder: form, onSubmit: () => {} })
+      const registry = Registry.make()
+
+      const initialState = atoms.operations.createInitialState({ name: "Bad" })
+      registry.set(atoms.stateAtom, Option.some(initialState))
+      registry.mount(atoms.stateAtom)
+      registry.mount(atoms.errorsAtom)
+
+      const fieldAtoms = atoms.getField(atoms.fieldRefs.name)
+      registry.mount(fieldAtoms.validate)
+      registry.set(fieldAtoms.validate, undefined)
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      const result = registry.get(fieldAtoms.validate)
+      expect(result.waiting).toBe(false)
+      const optionValue = Result.getOrThrow(result)
+      expect(Option.isSome(optionValue)).toBe(true)
+      const value = Option.getOrThrow(optionValue)
+      expect(value.isValid).toBe(false)
+      expect(Option.isSome(value.error)).toBe(true)
+      expect(Option.getOrThrow(value.error)).toBe("Too short")
+    })
+
+    it("updates errorsAtom after validation", async () => {
+      const runtime = Atom.runtime(Layer.empty)
+      const NameField = Field.makeField(
+        "name",
+        Schema.String.pipe(Schema.minLength(5, { message: () => "Too short" })),
+      )
+      const form = FormBuilder.empty.addField(NameField)
+      const atoms = FormAtoms.make({ runtime, formBuilder: form, onSubmit: () => {} })
+      const registry = Registry.make()
+
+      const initialState = atoms.operations.createInitialState({ name: "Bad" })
+      registry.set(atoms.stateAtom, Option.some(initialState))
+      registry.mount(atoms.stateAtom)
+      registry.mount(atoms.errorsAtom)
+
+      // No errors initially
+      expect(registry.get(atoms.errorsAtom).size).toBe(0)
+
+      const fieldAtoms = atoms.getField(atoms.fieldRefs.name)
+      registry.mount(fieldAtoms.validate)
+      registry.set(fieldAtoms.validate, undefined)
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      // Error should be populated after validation
+      const errors = registry.get(atoms.errorsAtom)
+      expect(errors.has("name")).toBe(true)
+      expect(errors.get("name")?.message).toBe("Too short")
+    })
+
+    it("clears error when validation passes", async () => {
+      const runtime = Atom.runtime(Layer.empty)
+      const NameField = Field.makeField(
+        "name",
+        Schema.String.pipe(Schema.minLength(3, { message: () => "Too short" })),
+      )
+      const form = FormBuilder.empty.addField(NameField)
+      const atoms = FormAtoms.make({ runtime, formBuilder: form, onSubmit: () => {} })
+      const registry = Registry.make()
+
+      const initialState = atoms.operations.createInitialState({ name: "Valid" })
+      registry.set(atoms.stateAtom, Option.some(initialState))
+      registry.mount(atoms.stateAtom)
+      registry.mount(atoms.errorsAtom)
+
+      // Set an error manually
+      registry.set(atoms.errorsAtom, new Map([["name", { message: "Some error", source: "field" as const }]]))
+      expect(registry.get(atoms.errorsAtom).has("name")).toBe(true)
+
+      const fieldAtoms = atoms.getField(atoms.fieldRefs.name)
+      registry.mount(fieldAtoms.validate)
+      registry.set(fieldAtoms.validate, undefined)
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      // Error should be cleared after successful validation
+      expect(registry.get(atoms.errorsAtom).has("name")).toBe(false)
+    })
+
+    it("returns Option.none when form is not initialized", async () => {
+      const runtime = Atom.runtime(Layer.empty)
+      const NameField = Field.makeField("name", Schema.String)
+      const form = FormBuilder.empty.addField(NameField)
+      const atoms = FormAtoms.make({ runtime, formBuilder: form, onSubmit: () => {} })
+      const registry = Registry.make()
+
+      // Don't initialize form state
+      const fieldAtoms = atoms.getField(atoms.fieldRefs.name)
+      registry.mount(fieldAtoms.validate)
+      registry.set(fieldAtoms.validate, undefined)
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      const result = registry.get(fieldAtoms.validate)
+      const optionValue = Result.getOrThrow(result)
+      expect(Option.isNone(optionValue)).toBe(true)
+    })
+
+    it("works with array field validation", async () => {
+      const runtime = Atom.runtime(Layer.empty)
+      const ItemsField = Field.makeArrayField(
+        "items",
+        Schema.Struct({ name: Schema.String }),
+        (schema) => schema.pipe(Schema.minItems(2, { message: () => "Need at least 2 items" })),
+      )
+      const form = FormBuilder.empty.addField(ItemsField)
+      const atoms = FormAtoms.make({ runtime, formBuilder: form, onSubmit: () => {} })
+      const registry = Registry.make()
+
+      // Only 1 item - should fail minItems validation
+      const initialState = atoms.operations.createInitialState({ items: [{ name: "Item 1" }] })
+      registry.set(atoms.stateAtom, Option.some(initialState))
+      registry.mount(atoms.stateAtom)
+      registry.mount(atoms.errorsAtom)
+
+      const arrayFieldAtoms = atoms.getArrayField(atoms.fieldRefs.items)
+      registry.mount(arrayFieldAtoms.validate)
+      registry.set(arrayFieldAtoms.validate, undefined)
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      const result = registry.get(arrayFieldAtoms.validate)
+      const optionValue = Result.getOrThrow(result)
+      expect(Option.isSome(optionValue)).toBe(true)
+      const value = Option.getOrThrow(optionValue)
+      expect(value.isValid).toBe(false)
+      expect(Option.getOrThrow(value.error)).toBe("Need at least 2 items")
+    })
+
+    it("array field validate returns isValid: true when valid", async () => {
+      const runtime = Atom.runtime(Layer.empty)
+      const ItemsField = Field.makeArrayField(
+        "items",
+        Schema.Struct({ name: Schema.String }),
+        (schema) => schema.pipe(Schema.minItems(1, { message: () => "Need at least 1 item" })),
+      )
+      const form = FormBuilder.empty.addField(ItemsField)
+      const atoms = FormAtoms.make({ runtime, formBuilder: form, onSubmit: () => {} })
+      const registry = Registry.make()
+
+      const initialState = atoms.operations.createInitialState({ items: [{ name: "Item 1" }] })
+      registry.set(atoms.stateAtom, Option.some(initialState))
+      registry.mount(atoms.stateAtom)
+      registry.mount(atoms.errorsAtom)
+
+      const arrayFieldAtoms = atoms.getArrayField(atoms.fieldRefs.items)
+      registry.mount(arrayFieldAtoms.validate)
+      registry.set(arrayFieldAtoms.validate, undefined)
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      const result = registry.get(arrayFieldAtoms.validate)
+      const optionValue = Result.getOrThrow(result)
+      expect(Option.isSome(optionValue)).toBe(true)
+      const value = Option.getOrThrow(optionValue)
+      expect(value.isValid).toBe(true)
+      expect(Option.isNone(value.error)).toBe(true)
+    })
+
+    it("validates with NonEmptyString and custom message", async () => {
+      const runtime = Atom.runtime(Layer.empty)
+      const StrategyField = Field.makeField(
+        "strategy",
+        Schema.NonEmptyString.pipe(
+          Schema.annotations({ message: () => "Strategy name is required" }),
+        ),
+      )
+      const form = FormBuilder.empty.addField(StrategyField)
+      const atoms = FormAtoms.make({ runtime, formBuilder: form, onSubmit: () => {} })
+      const registry = Registry.make()
+
+      // Empty string should fail validation
+      const initialState = atoms.operations.createInitialState({ strategy: "" })
+      registry.set(atoms.stateAtom, Option.some(initialState))
+      registry.mount(atoms.stateAtom)
+      registry.mount(atoms.errorsAtom)
+
+      const fieldAtoms = atoms.getField(atoms.fieldRefs.strategy)
+      registry.mount(fieldAtoms.validate)
+      registry.set(fieldAtoms.validate, undefined)
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      const result = registry.get(fieldAtoms.validate)
+      const optionValue = Result.getOrThrow(result)
+      expect(Option.isSome(optionValue)).toBe(true)
+      const value = Option.getOrThrow(optionValue)
+      expect(value.isValid).toBe(false)
+      expect(Option.isSome(value.error)).toBe(true)
+      expect(Option.getOrThrow(value.error)).toBe("Strategy name is required")
     })
   })
 })

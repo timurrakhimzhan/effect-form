@@ -3,6 +3,16 @@
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
+var _exportNames = {
+  Field: true,
+  FormAtoms: true,
+  FormBuilder: true,
+  FormReact: true,
+  useFormField: true,
+  useArrayField: true,
+  FormProvider: true,
+  useFormContext: true
+};
 Object.defineProperty(exports, "Field", {
   enumerable: true,
   get: function () {
@@ -49,6 +59,17 @@ Object.defineProperty(exports, "useFormField", {
 var _effectForm = /*#__PURE__*/require("@lucas-barake/effect-form");
 var _FormReact = /*#__PURE__*/_interopRequireWildcard(/*#__PURE__*/require("./FormReact.js"));
 exports.FormReact = _FormReact;
+Object.keys(_FormReact).forEach(function (key) {
+  if (key === "default" || key === "__esModule") return;
+  if (Object.prototype.hasOwnProperty.call(_exportNames, key)) return;
+  if (key in exports && exports[key] === _FormReact[key]) return;
+  Object.defineProperty(exports, key, {
+    enumerable: true,
+    get: function () {
+      return _FormReact[key];
+    }
+  });
+});
 var _useFormField = /*#__PURE__*/require("./useFormField.js");
 var _useArrayField = /*#__PURE__*/require("./useArrayField.js");
 var _FormProvider = /*#__PURE__*/require("./FormProvider.js");

@@ -5,6 +5,7 @@ export { Field, FormAtoms, FormBuilder } from "@lucas-barake/effect-form";
 /**
  * React bindings for @lucas-barake/effect-form.
  */
+export * from "./FormReact.js";
 export * as FormReact from "./FormReact.js";
 /**
  * Hook for individual field state management.

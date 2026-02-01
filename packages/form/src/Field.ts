@@ -10,14 +10,20 @@ export interface FieldDef<K extends string, S extends Schema.Schema.Any> {
   readonly schema: S
 }
 
-export interface ArrayFieldDef<K extends string, S extends Schema.Schema.Any, AS extends Schema.Schema.Any = Schema.Array$<S>> {
+export interface ArrayFieldDef<
+  K extends string,
+  S extends Schema.Schema.Any,
+  AS extends Schema.Schema.Any = Schema.Array$<S>,
+> {
   readonly _tag: "array"
   readonly key: K
   readonly itemSchema: S
   readonly arraySchema: AS
 }
 
-export type AnyFieldDef = FieldDef<string, Schema.Schema.Any> | ArrayFieldDef<string, Schema.Schema.Any, Schema.Schema.Any>
+export type AnyFieldDef =
+  | FieldDef<string, Schema.Schema.Any>
+  | ArrayFieldDef<string, Schema.Schema.Any, Schema.Schema.Any>
 
 export type FieldsRecord = Record<string, AnyFieldDef>
 
@@ -35,7 +41,11 @@ export const makeField = <K extends string, S extends Schema.Schema.Any>(
   schema,
 })
 
-export const makeArrayField = <K extends string, S extends Schema.Schema.Any, AS extends Schema.Schema.Any = Schema.Array$<S>>(
+export const makeArrayField = <
+  K extends string,
+  S extends Schema.Schema.Any,
+  AS extends Schema.Schema.Any = Schema.Array$<S>,
+>(
   key: K,
   itemSchema: S,
   modify?: (schema: Schema.Array$<S>) => AS,

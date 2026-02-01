@@ -1,7 +1,7 @@
 import * as Atom from "@effect-atom/atom/Atom";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import * as ParseResult from "effect/ParseResult";
+import type * as ParseResult from "effect/ParseResult";
 import * as Schema from "effect/Schema";
 import * as Field from "./Field.js";
 import * as FormBuilder from "./FormBuilder.js";
@@ -43,6 +43,8 @@ export interface PublicFieldAtoms<S> {
     readonly onChange: Atom.Writable<void, S>;
     /** Trigger onBlur handler (sets touched + triggers validation if mode is onBlur) */
     readonly onBlur: Atom.Writable<void, void>;
+    /** Manually trigger validation and get the result. Returns None if form not initialized. */
+    readonly validate: Atom.AtomResultFn<void, Option.Option<ValidationResult>, never>;
     /** The field's path/key */
     readonly key: string;
 }
@@ -52,6 +54,13 @@ export interface PublicFieldAtoms<S> {
 export type ArrayItemTouched<S> = S extends Record<string, unknown> ? {
     readonly [K in keyof S]?: boolean;
 } : boolean;
+/**
+ * Result of manual field validation
+ */
+export interface ValidationResult {
+    readonly isValid: boolean;
+    readonly error: Option.Option<string>;
+}
 /**
  * Public interface for accessing atoms related to an array field.
  * Use getArrayField() to get this interface for array fields.
@@ -64,7 +73,7 @@ export interface PublicArrayFieldAtoms<S> {
     /** The visible error message for the array itself (e.g., minItems validation) */
     readonly error: Atom.Atom<Option.Option<string>>;
     /** Touched state for each item in the array */
-    readonly touched: Atom.Atom<Option.Option<ReadonlyArray<ArrayItemTouched<S>>>>;
+    readonly touched: Atom.Atom<Option.Option<boolean | ReadonlyArray<ArrayItemTouched<S>>>>;
     /** Whether the array field is dirty (any item changed) */
     readonly isDirty: Atom.Atom<boolean>;
     /** Whether async validation is in progress for the array */
@@ -85,6 +94,8 @@ export interface PublicArrayFieldAtoms<S> {
         from: number;
         to: number;
     }>;
+    /** Manually trigger validation and get the result. Returns None if form not initialized. */
+    readonly validate: Atom.AtomResultFn<void, Option.Option<ValidationResult>, never>;
 }
 export interface FormAtomsConfig<TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = void> {
     readonly runtime: Atom.AtomRuntime<R, any>;
@@ -125,7 +136,10 @@ export interface FormAtoms<TFields extends Field.FieldsRecord, R, A = void, E = 
     readonly resetAtom: Atom.Writable<void, void>;
     readonly revertToLastSubmitAtom: Atom.Writable<void, void>;
     readonly setValuesAtom: Atom.Writable<void, Field.EncodedFromFields<TFields>>;
-    readonly setValue: <S>(field: FormBuilder.FieldRef<S> | FormBuilder.ArrayFieldRef<S>) => Atom.Writable<void, S | ((prev: S) => S)>;
+    readonly setValue: {
+        <S>(field: FormBuilder.FieldRef<S>): Atom.Writable<void, S | ((prev: S) => S)>;
+        <S>(field: FormBuilder.ArrayFieldRef<S>): Atom.Writable<void, ReadonlyArray<S> | ((prev: ReadonlyArray<S>) => ReadonlyArray<S>)>;
+    };
     readonly getFieldAtom: {
         <S>(field: FormBuilder.FieldRef<S>): Atom.Atom<Option.Option<S>>;
         <S>(field: FormBuilder.ArrayFieldRef<S>): Atom.Atom<Option.Option<ReadonlyArray<S>>>;
