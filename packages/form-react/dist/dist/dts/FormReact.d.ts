@@ -27,7 +27,7 @@ export type ArrayItemComponentMap<S extends Schema.Schema.Any> = S extends Schem
     readonly [K in keyof Fields]: Fields[K] extends Schema.Schema.Any ? React.FC<FieldComponentProps<Schema.Schema.Encoded<Fields[K]>, any>> : never;
 } : React.FC<FieldComponentProps<Schema.Schema.Encoded<S>, any>>;
 export type FieldComponentMap<TFields extends Field.FieldsRecord> = {
-    readonly [K in keyof TFields]: TFields[K] extends Field.FieldDef<any, infer S> ? React.FC<FieldComponentProps<Schema.Schema.Encoded<S>, any>> : TFields[K] extends Field.ArrayFieldDef<any, infer S> ? ArrayItemComponentMap<S> : never;
+    readonly [K in keyof TFields]: TFields[K] extends Field.FieldDef<any, infer S> ? React.FC<FieldComponentProps<Schema.Schema.Encoded<S>, any>> : TFields[K] extends Field.ArrayFieldDef<any, infer S, any> ? ArrayItemComponentMap<S> : never;
 };
 export type FieldRefs<TFields extends Field.FieldsRecord> = FormAtoms.FieldRefs<TFields>;
 export interface ArrayFieldOperations<TItem> {
@@ -53,14 +53,18 @@ export type BuiltForm<TFields extends Field.FieldsRecord, R, A = void, E = never
     readonly reset: Atom.Writable<void, void>;
     readonly revertToLastSubmit: Atom.Writable<void, void>;
     readonly setValues: Atom.Writable<void, Field.EncodedFromFields<TFields>>;
-    readonly setValue: <S>(field: FormBuilder.FieldRef<S>) => Atom.Writable<void, S | ((prev: S) => S)>;
-    readonly getFieldAtom: <S>(field: FormBuilder.FieldRef<S>) => Atom.Atom<Option.Option<S>>;
+    readonly setValue: <S>(field: FormBuilder.FieldRef<S> | FormBuilder.ArrayFieldRef<S>) => Atom.Writable<void, S | ((prev: S) => S)>;
+    readonly getFieldAtom: {
+        <S>(field: FormBuilder.FieldRef<S>): Atom.Atom<Option.Option<S>>;
+        <S>(field: FormBuilder.ArrayFieldRef<S>): Atom.Atom<Option.Option<ReadonlyArray<S>>>;
+    };
     readonly getField: <S>(field: FormBuilder.FieldRef<S>) => FormAtoms.PublicFieldAtoms<S>;
+    readonly getArrayField: <S>(field: FormBuilder.ArrayFieldRef<S>) => FormAtoms.PublicArrayFieldAtoms<S>;
     readonly mount: Atom.Atom<void>;
     readonly KeepAlive: React.FC;
 } & FieldComponents<TFields, CM>;
 type FieldComponents<TFields extends Field.FieldsRecord, CM extends FieldComponentMap<TFields>> = {
-    readonly [K in keyof TFields]: TFields[K] extends Field.FieldDef<any, any> ? React.FC<ExtractExtraProps<CM[K]>> : TFields[K] extends Field.ArrayFieldDef<any, infer S> ? ArrayFieldComponent<S, ExtractArrayItemExtraProps<CM[K], S>> : never;
+    readonly [K in keyof TFields]: TFields[K] extends Field.FieldDef<any, any> ? React.FC<ExtractExtraProps<CM[K]>> : TFields[K] extends Field.ArrayFieldDef<any, infer S, any> ? ArrayFieldComponent<S, ExtractArrayItemExtraProps<CM[K], S>> : never;
 };
 type ExtractArrayItemExtraProps<CM, S extends Schema.Schema.Any> = S extends Schema.Struct<infer Fields> ? {
     readonly [K in keyof Fields]: CM extends {

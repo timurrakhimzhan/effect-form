@@ -54,6 +54,42 @@ export interface PublicFieldAtoms<S> {
   readonly key: string
 }
 
+/**
+ * Touched state for an array item - maps field names to booleans
+ */
+export type ArrayItemTouched<S> = S extends Record<string, unknown>
+  ? { readonly [K in keyof S]?: boolean }
+  : boolean
+
+/**
+ * Public interface for accessing atoms related to an array field.
+ * Use getArrayField() to get this interface for array fields.
+ */
+export interface PublicArrayFieldAtoms<S> {
+  /** The current array value (None if form not initialized) */
+  readonly value: Atom.Atom<Option.Option<ReadonlyArray<S>>>
+  /** The initial array value */
+  readonly initialValue: Atom.Atom<Option.Option<ReadonlyArray<S>>>
+  /** The visible error message for the array itself (e.g., minItems validation) */
+  readonly error: Atom.Atom<Option.Option<string>>
+  /** Touched state for each item in the array */
+  readonly touched: Atom.Atom<Option.Option<ReadonlyArray<ArrayItemTouched<S>>>>
+  /** Whether the array field is dirty (any item changed) */
+  readonly isDirty: Atom.Atom<boolean>
+  /** Whether async validation is in progress for the array */
+  readonly isValidating: Atom.Atom<boolean>
+  /** The array field's path/key */
+  readonly key: string
+  /** Append a new item to the array */
+  readonly append: Atom.Writable<void, S | undefined>
+  /** Remove an item at the specified index */
+  readonly remove: Atom.Writable<void, number>
+  /** Swap items at two indices */
+  readonly swap: Atom.Writable<void, { indexA: number; indexB: number }>
+  /** Move an item from one index to another */
+  readonly move: Atom.Writable<void, { from: number; to: number }>
+}
+
 export interface FormAtomsConfig<TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = void> {
   readonly runtime: Atom.AtomRuntime<R, any>
   readonly formBuilder: FormBuilder.FormBuilder<TFields, R>
@@ -72,8 +108,8 @@ export interface FormAtomsConfig<TFields extends Field.FieldsRecord, R, A, E, Su
 export type FieldRefs<TFields extends Field.FieldsRecord> = {
   readonly [K in keyof TFields]: TFields[K] extends Field.FieldDef<any, infer S> ?
     FormBuilder.FieldRef<Schema.Schema.Encoded<S>>
-    : TFields[K] extends Field.ArrayFieldDef<any, infer S> ?
-      FormBuilder.FieldRef<ReadonlyArray<Schema.Schema.Encoded<S>>>
+    : TFields[K] extends Field.ArrayFieldDef<any, infer S, any> ?
+      FormBuilder.ArrayFieldRef<Schema.Schema.Encoded<S>>
     : never
 }
 
@@ -115,13 +151,18 @@ export interface FormAtoms<TFields extends Field.FieldsRecord, R, A = void, E = 
   readonly resetAtom: Atom.Writable<void, void>
   readonly revertToLastSubmitAtom: Atom.Writable<void, void>
   readonly setValuesAtom: Atom.Writable<void, Field.EncodedFromFields<TFields>>
-  readonly setValue: <S>(field: FormBuilder.FieldRef<S>) => Atom.Writable<void, S | ((prev: S) => S)>
+  readonly setValue: <S>(field: FormBuilder.FieldRef<S> | FormBuilder.ArrayFieldRef<S>) => Atom.Writable<void, S | ((prev: S) => S)>
 
-  readonly getFieldAtom: <S>(field: FormBuilder.FieldRef<S>) => Atom.Atom<Option.Option<S>>
+  readonly getFieldAtom: {
+    <S>(field: FormBuilder.FieldRef<S>): Atom.Atom<Option.Option<S>>
+    <S>(field: FormBuilder.ArrayFieldRef<S>): Atom.Atom<Option.Option<ReadonlyArray<S>>>
+  }
 
   /**
-   * Get all atoms for a field, allowing you to subscribe to or interact with
+   * Get all atoms for a non-array field, allowing you to subscribe to or interact with
    * any aspect of the field state outside of the generated field components.
+   *
+   * For array fields, use `getArrayField` instead.
    *
    * @example
    * ```tsx
@@ -137,6 +178,27 @@ export interface FormAtoms<TFields extends Field.FieldsRecord, R, A = void, E = 
    * ```
    */
   readonly getField: <S>(field: FormBuilder.FieldRef<S>) => PublicFieldAtoms<S>
+
+  /**
+   * Get all atoms for an array field, including array-specific operations.
+   *
+   * For non-array fields, use `getField` instead.
+   *
+   * @example
+   * ```tsx
+   * const itemsField = form.getArrayField(form.fields.items)
+   *
+   * // Subscribe to array state
+   * const items = useAtomValue(itemsField.value)
+   * const error = useAtomValue(itemsField.error) // minItems error
+   * const touched = useAtomValue(itemsField.touched) // per-item touched state
+   *
+   * // Array operations
+   * const append = useAtomSet(itemsField.append)
+   * append({ name: "New Item" })
+   * ```
+   */
+  readonly getArrayField: <S>(field: FormBuilder.ArrayFieldRef<S>) => PublicArrayFieldAtoms<S>
 
   /**
    * Root anchor atom for the form's dependency graph.
@@ -361,6 +423,10 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
     }
 
     if (Field.isArrayFieldDef(fieldDef)) {
+      // If path is just the array field name (no index), return the array schema
+      if (parts[0] === rootFieldName && parts.length === 1) {
+        return fieldDef.arraySchema
+      }
       // If there are more parts, we need to get the nested field schema
       if (parts.length > 1 && AST.isTypeLiteral(fieldDef.itemSchema.ast)) {
         const nestedFieldName = parts[1].replace(/\[\d+\]$/, "")
@@ -374,6 +440,17 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
       return fieldDef.itemSchema
     }
 
+    return undefined
+  }
+
+  // Get the parent array field path from an item field path (e.g., "items[0].name" -> "items")
+  const getParentArrayPath = (fieldPath: string): string | undefined => {
+    const parts = fieldPath.split(".")
+    const rootPart = parts[0]
+    const match = rootPart.match(/^([^[]+)\[\d+\]$/)
+    if (match) {
+      return match[1]
+    }
     return undefined
   }
 
@@ -536,6 +613,14 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
 
       if (shouldValidate) {
         get.set(triggerValidationAtom, value)
+
+        // Also trigger parent array validation if this field is inside an array
+        const parentArrayPath = getParentArrayPath(fieldPath)
+        if (parentArrayPath) {
+          const arrayAtoms = getOrCreateFieldAtoms(parentArrayPath)
+          const arrayValue = getNestedValue(newState.values, parentArrayPath)
+          get.set(arrayAtoms.triggerValidationAtom, arrayValue)
+        }
       }
 
       // Trigger auto-submit for onChange mode (debounced)
@@ -566,6 +651,14 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
       if (parsedMode.validation === "onBlur") {
         const value = getNestedValue(currentState.values, fieldPath)
         get.set(triggerValidationAtom, value)
+
+        // Also trigger parent array validation if this field is inside an array
+        const parentArrayPath = getParentArrayPath(fieldPath)
+        if (parentArrayPath) {
+          const arrayAtoms = getOrCreateFieldAtoms(parentArrayPath)
+          const arrayValue = getNestedValue(currentState.values, parentArrayPath)
+          get.set(arrayAtoms.triggerValidationAtom, arrayValue)
+        }
       }
     }, { initialValue: undefined as void }).pipe(Atom.setIdleTTL(0))
 
@@ -629,7 +722,12 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
   ).pipe(Atom.setIdleTTL(0)) as Atom.AtomResultFn<SubmitArgs, A, E | ParseResult.ParseError>
 
   const fieldRefs = Object.fromEntries(
-    Object.keys(fields).map((key) => [key, FormBuilder.makeFieldRef(key)]),
+    Object.entries(fields).map(([key, def]) => [
+      key,
+      Field.isArrayFieldDef(def)
+        ? FormBuilder.makeArrayFieldRef(key)
+        : FormBuilder.makeFieldRef(key),
+    ]),
   ) as FieldRefs<TFields>
 
   const operations: FormOperations<TFields> = {
@@ -801,7 +899,7 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
 
   const setValueAtomsRegistry = createWeakRegistry<Atom.Writable<void, any>>()
 
-  const setValue = <S>(field: FormBuilder.FieldRef<S>): Atom.Writable<void, S | ((prev: S) => S)> => {
+  const setValue = <S>(field: FormBuilder.FieldRef<S> | FormBuilder.ArrayFieldRef<S>): Atom.Writable<void, S | ((prev: S) => S)> => {
     const cached = setValueAtomsRegistry.get(field.key)
     if (cached) return cached
 
@@ -822,7 +920,10 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
     return atom
   }
 
-  const getFieldAtom = <S>(field: FormBuilder.FieldRef<S>): Atom.Atom<Option.Option<S>> => {
+  const getFieldAtom: {
+    <S>(field: FormBuilder.FieldRef<S>): Atom.Atom<Option.Option<S>>
+    <S>(field: FormBuilder.ArrayFieldRef<S>): Atom.Atom<Option.Option<ReadonlyArray<S>>>
+  } = <S>(field: FormBuilder.FieldRef<S> | FormBuilder.ArrayFieldRef<S>): Atom.Atom<Option.Option<S | ReadonlyArray<S>>> => {
     const existing = publicFieldAtomRegistry.get(field.key)
     if (existing) return existing as Atom.Atom<Option.Option<S>>
 
@@ -884,6 +985,115 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
     }
 
     publicFieldAtomsRegistry.set(field.key, result as PublicFieldAtoms<unknown>)
+    return result
+  }
+
+  const publicArrayFieldAtomsRegistry = createWeakRegistry<PublicArrayFieldAtoms<unknown>>()
+
+  const getArrayField = <S>(field: FormBuilder.ArrayFieldRef<S>): PublicArrayFieldAtoms<S> => {
+    const existing = publicArrayFieldAtomsRegistry.get(field.key)
+    if (existing) return existing as PublicArrayFieldAtoms<S>
+
+    const fieldAtoms = getOrCreateFieldAtoms(field.key)
+    const fieldDef = fields[field.key]
+    if (!fieldDef || !Field.isArrayFieldDef(fieldDef)) {
+      throw new Error(`Field "${field.key}" is not an array field`)
+    }
+
+    // Safe value atom (returns None if form not initialized)
+    const valueAtom = Atom.readable((get) =>
+      Option.map(get(stateAtom), (state) => getNestedValue(state.values, field.key) as ReadonlyArray<S>)
+    ).pipe(Atom.setIdleTTL(0))
+
+    // Safe initial value atom
+    const initialValueAtom = Atom.readable((get) =>
+      Option.map(get(stateAtom), (state) => getNestedValue(state.initialValues, field.key) as ReadonlyArray<S>)
+    ).pipe(Atom.setIdleTTL(0))
+
+    // Touched state for each item
+    const touchedAtom = Atom.readable((get) =>
+      Option.map(get(stateAtom), (state) =>
+        (getNestedValue(state.touched, field.key) ?? []) as ReadonlyArray<ArrayItemTouched<S>>
+      )
+    ).pipe(Atom.setIdleTTL(0))
+
+    // isDirty computed atom
+    const isDirtyAtom = Atom.readable((get) =>
+      isPathOrParentDirty(get(dirtyFieldsAtom), field.key)
+    ).pipe(Atom.setIdleTTL(0))
+
+    // Append operation
+    const appendAtom = Atom.writable(
+      () => undefined as void,
+      (ctx, value: S | undefined) => {
+        const prev = ctx.get(stateAtom)
+        if (Option.isNone(prev)) return
+        const newState = operations.appendArrayItem(prev.value, field.key, fieldDef.itemSchema, value)
+        ctx.set(stateAtom, Option.some(newState))
+        // Trigger validation after append
+        const arrayValue = getNestedValue(newState.values, field.key)
+        ctx.set(fieldAtoms.triggerValidationAtom, arrayValue)
+      }
+    ).pipe(Atom.setIdleTTL(0))
+
+    // Remove operation
+    const removeAtom = Atom.writable(
+      () => undefined as void,
+      (ctx, index: number) => {
+        const prev = ctx.get(stateAtom)
+        if (Option.isNone(prev)) return
+        let newState = operations.removeArrayItem(prev.value, field.key, index)
+        newState = operations.setFieldTouched(newState, field.key, true)
+        ctx.set(stateAtom, Option.some(newState))
+        // Trigger validation after remove
+        const arrayValue = getNestedValue(newState.values, field.key)
+        ctx.set(fieldAtoms.triggerValidationAtom, arrayValue)
+      }
+    ).pipe(Atom.setIdleTTL(0))
+
+    // Swap operation
+    const swapAtom = Atom.writable(
+      () => undefined as void,
+      (ctx, { indexA, indexB }: { indexA: number; indexB: number }) => {
+        const prev = ctx.get(stateAtom)
+        if (Option.isNone(prev)) return
+        const newState = operations.swapArrayItems(prev.value, field.key, indexA, indexB)
+        ctx.set(stateAtom, Option.some(newState))
+        // Trigger validation after swap
+        const arrayValue = getNestedValue(newState.values, field.key)
+        ctx.set(fieldAtoms.triggerValidationAtom, arrayValue)
+      }
+    ).pipe(Atom.setIdleTTL(0))
+
+    // Move operation
+    const moveAtom = Atom.writable(
+      () => undefined as void,
+      (ctx, { from, to }: { from: number; to: number }) => {
+        const prev = ctx.get(stateAtom)
+        if (Option.isNone(prev)) return
+        const newState = operations.moveArrayItem(prev.value, field.key, from, to)
+        ctx.set(stateAtom, Option.some(newState))
+        // Trigger validation after move
+        const arrayValue = getNestedValue(newState.values, field.key)
+        ctx.set(fieldAtoms.triggerValidationAtom, arrayValue)
+      }
+    ).pipe(Atom.setIdleTTL(0))
+
+    const result: PublicArrayFieldAtoms<S> = {
+      value: valueAtom,
+      initialValue: initialValueAtom,
+      error: fieldAtoms.visibleErrorAtom,
+      touched: touchedAtom,
+      isDirty: isDirtyAtom,
+      isValidating: fieldAtoms.isValidatingAtom,
+      key: field.key,
+      append: appendAtom,
+      remove: removeAtom,
+      swap: swapAtom,
+      move: moveAtom,
+    }
+
+    publicArrayFieldAtomsRegistry.set(field.key, result as PublicArrayFieldAtoms<unknown>)
     return result
   }
 
@@ -1000,6 +1210,7 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
     setValue,
     getFieldAtom,
     getField,
+    getArrayField,
     mountAtom,
     keepAliveActiveAtom,
     initializeAtom,

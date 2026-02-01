@@ -46,6 +46,46 @@ export interface PublicFieldAtoms<S> {
     /** The field's path/key */
     readonly key: string;
 }
+/**
+ * Touched state for an array item - maps field names to booleans
+ */
+export type ArrayItemTouched<S> = S extends Record<string, unknown> ? {
+    readonly [K in keyof S]?: boolean;
+} : boolean;
+/**
+ * Public interface for accessing atoms related to an array field.
+ * Use getArrayField() to get this interface for array fields.
+ */
+export interface PublicArrayFieldAtoms<S> {
+    /** The current array value (None if form not initialized) */
+    readonly value: Atom.Atom<Option.Option<ReadonlyArray<S>>>;
+    /** The initial array value */
+    readonly initialValue: Atom.Atom<Option.Option<ReadonlyArray<S>>>;
+    /** The visible error message for the array itself (e.g., minItems validation) */
+    readonly error: Atom.Atom<Option.Option<string>>;
+    /** Touched state for each item in the array */
+    readonly touched: Atom.Atom<Option.Option<ReadonlyArray<ArrayItemTouched<S>>>>;
+    /** Whether the array field is dirty (any item changed) */
+    readonly isDirty: Atom.Atom<boolean>;
+    /** Whether async validation is in progress for the array */
+    readonly isValidating: Atom.Atom<boolean>;
+    /** The array field's path/key */
+    readonly key: string;
+    /** Append a new item to the array */
+    readonly append: Atom.Writable<void, S | undefined>;
+    /** Remove an item at the specified index */
+    readonly remove: Atom.Writable<void, number>;
+    /** Swap items at two indices */
+    readonly swap: Atom.Writable<void, {
+        indexA: number;
+        indexB: number;
+    }>;
+    /** Move an item from one index to another */
+    readonly move: Atom.Writable<void, {
+        from: number;
+        to: number;
+    }>;
+}
 export interface FormAtomsConfig<TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = void> {
     readonly runtime: Atom.AtomRuntime<R, any>;
     readonly formBuilder: FormBuilder.FormBuilder<TFields, R>;
@@ -58,7 +98,7 @@ export interface FormAtomsConfig<TFields extends Field.FieldsRecord, R, A, E, Su
     readonly validationDebounceMs?: number;
 }
 export type FieldRefs<TFields extends Field.FieldsRecord> = {
-    readonly [K in keyof TFields]: TFields[K] extends Field.FieldDef<any, infer S> ? FormBuilder.FieldRef<Schema.Schema.Encoded<S>> : TFields[K] extends Field.ArrayFieldDef<any, infer S> ? FormBuilder.FieldRef<ReadonlyArray<Schema.Schema.Encoded<S>>> : never;
+    readonly [K in keyof TFields]: TFields[K] extends Field.FieldDef<any, infer S> ? FormBuilder.FieldRef<Schema.Schema.Encoded<S>> : TFields[K] extends Field.ArrayFieldDef<any, infer S, any> ? FormBuilder.ArrayFieldRef<Schema.Schema.Encoded<S>> : never;
 };
 export interface FormAtoms<TFields extends Field.FieldsRecord, R, A = void, E = never, SubmitArgs = void> {
     readonly stateAtom: Atom.Writable<Option.Option<FormBuilder.FormState<TFields>>, Option.Option<FormBuilder.FormState<TFields>>>;
@@ -85,11 +125,16 @@ export interface FormAtoms<TFields extends Field.FieldsRecord, R, A = void, E = 
     readonly resetAtom: Atom.Writable<void, void>;
     readonly revertToLastSubmitAtom: Atom.Writable<void, void>;
     readonly setValuesAtom: Atom.Writable<void, Field.EncodedFromFields<TFields>>;
-    readonly setValue: <S>(field: FormBuilder.FieldRef<S>) => Atom.Writable<void, S | ((prev: S) => S)>;
-    readonly getFieldAtom: <S>(field: FormBuilder.FieldRef<S>) => Atom.Atom<Option.Option<S>>;
+    readonly setValue: <S>(field: FormBuilder.FieldRef<S> | FormBuilder.ArrayFieldRef<S>) => Atom.Writable<void, S | ((prev: S) => S)>;
+    readonly getFieldAtom: {
+        <S>(field: FormBuilder.FieldRef<S>): Atom.Atom<Option.Option<S>>;
+        <S>(field: FormBuilder.ArrayFieldRef<S>): Atom.Atom<Option.Option<ReadonlyArray<S>>>;
+    };
     /**
-     * Get all atoms for a field, allowing you to subscribe to or interact with
+     * Get all atoms for a non-array field, allowing you to subscribe to or interact with
      * any aspect of the field state outside of the generated field components.
+     *
+     * For array fields, use `getArrayField` instead.
      *
      * @example
      * ```tsx
@@ -105,6 +150,26 @@ export interface FormAtoms<TFields extends Field.FieldsRecord, R, A = void, E = 
      * ```
      */
     readonly getField: <S>(field: FormBuilder.FieldRef<S>) => PublicFieldAtoms<S>;
+    /**
+     * Get all atoms for an array field, including array-specific operations.
+     *
+     * For non-array fields, use `getField` instead.
+     *
+     * @example
+     * ```tsx
+     * const itemsField = form.getArrayField(form.fields.items)
+     *
+     * // Subscribe to array state
+     * const items = useAtomValue(itemsField.value)
+     * const error = useAtomValue(itemsField.error) // minItems error
+     * const touched = useAtomValue(itemsField.touched) // per-item touched state
+     *
+     * // Array operations
+     * const append = useAtomSet(itemsField.append)
+     * append({ name: "New Item" })
+     * ```
+     */
+    readonly getArrayField: <S>(field: FormBuilder.ArrayFieldRef<S>) => PublicArrayFieldAtoms<S>;
     /**
      * Root anchor atom for the form's dependency graph.
      * Mount this atom to keep all form state alive even when field components unmount.

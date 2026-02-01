@@ -1863,4 +1863,80 @@ describe("FormAtoms", () => {
       expect(errors.get("name")?.message).toBe("Too short")
     })
   })
+
+  describe("Array field with minItems validation", () => {
+    const makeArrayFormWithMinItems = () => {
+      const TitleField = Field.makeField("title", Schema.String)
+      const ItemsField = Field.makeArrayField(
+        "items",
+        Schema.Struct({ name: Schema.String }),
+        (schema) => schema.pipe(Schema.minItems(1, { message: () => "At least one item required" }))
+      )
+      return FormBuilder.empty.addField(TitleField).addField(ItemsField)
+    }
+
+    it("validates array minItems constraint", () => {
+      const runtime = Atom.runtime(Layer.empty)
+      const form = makeArrayFormWithMinItems()
+      const atoms = FormAtoms.make({ runtime, formBuilder: form, onSubmit: () => {} })
+
+      // Empty array should fail validation
+      const emptyResult = Schema.decodeUnknownEither(atoms.combinedSchema)({
+        title: "Test",
+        items: [],
+      })
+      expect(emptyResult._tag).toBe("Left")
+
+      // Array with one item should pass
+      const validResult = Schema.decodeUnknownEither(atoms.combinedSchema)({
+        title: "Test",
+        items: [{ name: "Item 1" }],
+      })
+      expect(validResult._tag).toBe("Right")
+    })
+
+    it("creates field atoms for array field path", () => {
+      const runtime = Atom.runtime(Layer.empty)
+      const form = makeArrayFormWithMinItems()
+      const atoms = FormAtoms.make({ runtime, formBuilder: form, onSubmit: () => {} })
+      const registry = Registry.make()
+
+      const initialState = atoms.operations.createInitialState({
+        title: "Test",
+        items: [{ name: "Item 1" }],
+      })
+      registry.set(atoms.stateAtom, Option.some(initialState))
+
+      // Should be able to create field atoms for the array field itself
+      const arrayFieldAtoms = atoms.getOrCreateFieldAtoms("items")
+      expect(arrayFieldAtoms).toBeDefined()
+      expect(arrayFieldAtoms.valueAtom).toBeDefined()
+      expect(arrayFieldAtoms.triggerValidationAtom).toBeDefined()
+    })
+
+    it("validates array field when triggered", async () => {
+      const runtime = Atom.runtime(Layer.empty)
+      const form = makeArrayFormWithMinItems()
+      const atoms = FormAtoms.make({ runtime, formBuilder: form, onSubmit: () => {}, mode: "onChange" })
+      const registry = Registry.make()
+
+      const initialState = atoms.operations.createInitialState({
+        title: "Test",
+        items: [], // Empty array - should fail minItems
+      })
+      registry.set(atoms.stateAtom, Option.some(initialState))
+      registry.mount(atoms.stateAtom)
+      registry.mount(atoms.errorsAtom)
+
+      const arrayFieldAtoms = atoms.getOrCreateFieldAtoms("items")
+      registry.mount(arrayFieldAtoms.triggerValidationAtom)
+      registry.set(arrayFieldAtoms.triggerValidationAtom, [])
+
+      await new Promise((resolve) => setTimeout(resolve, 100))
+
+      const errors = registry.get(atoms.errorsAtom)
+      expect(errors.has("items")).toBe(true)
+      expect(errors.get("items")?.message).toBe("At least one item required")
+    })
+  })
 })

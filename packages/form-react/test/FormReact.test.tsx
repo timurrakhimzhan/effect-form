@@ -575,6 +575,260 @@ describe("FormReact.make", () => {
         expect((screen.getByTestId("item-name") as HTMLInputElement).value).toBe("Item 2")
       })
     })
+
+    it("validates array field with multiple subfields and minItems constraint", async () => {
+      const user = userEvent.setup()
+
+      const TradingPairsField = Field.makeArrayField(
+        "tradingPairs",
+        Schema.Struct({
+          base: Schema.String,
+          quote: Schema.String,
+          exchange: Schema.String,
+        }),
+        (schema) => schema.pipe(Schema.minItems(1, { message: () => "At least one trading pair required" })),
+      )
+      const formBuilder = FormBuilder.empty.addField(TradingPairsField)
+
+      const BaseInput: FormReact.FieldComponent<string> = ({ field }) => (
+        <input
+          type="text"
+          value={field.value}
+          onChange={(e) => field.onChange(e.target.value)}
+          onBlur={field.onBlur}
+          data-testid="base-input"
+        />
+      )
+
+      const QuoteInput: FormReact.FieldComponent<string> = ({ field }) => (
+        <input
+          type="text"
+          value={field.value}
+          onChange={(e) => field.onChange(e.target.value)}
+          onBlur={field.onBlur}
+          data-testid="quote-input"
+        />
+      )
+
+      const ExchangeInput: FormReact.FieldComponent<string> = ({ field }) => (
+        <input
+          type="text"
+          value={field.value}
+          onChange={(e) => field.onChange(e.target.value)}
+          onBlur={field.onBlur}
+          data-testid="exchange-input"
+        />
+      )
+
+      const submitHandler = vi.fn()
+
+      const form = FormReact.make(formBuilder, {
+        fields: {
+          tradingPairs: {
+            base: BaseInput,
+            quote: QuoteInput,
+            exchange: ExchangeInput,
+          },
+        },
+        onSubmit: (_: void, { decoded }) => submitHandler(decoded),
+      })
+
+      const SubmitButton = makeSubmitButton(form.submit, undefined)
+
+      render(
+        <form.Initialize defaultValues={{ tradingPairs: [{ base: "BTC", quote: "USDT", exchange: "Binance" }] }}>
+          <form.tradingPairs>
+            {({ items }) => (
+              <>
+                {items.map((_, i) => (
+                  <form.tradingPairs.Item key={i} index={i}>
+                    {({ remove }) => (
+                      <div data-testid={`pair-${i}`}>
+                        <form.tradingPairs.base />
+                        <form.tradingPairs.quote />
+                        <form.tradingPairs.exchange />
+                        <button type="button" onClick={remove} data-testid={`remove-${i}`}>
+                          Remove
+                        </button>
+                      </div>
+                    )}
+                  </form.tradingPairs.Item>
+                ))}
+              </>
+            )}
+          </form.tradingPairs>
+          <SubmitButton />
+        </form.Initialize>,
+      )
+
+      // Should render all 3 subfields
+      expect(screen.getByTestId("base-input")).toHaveValue("BTC")
+      expect(screen.getByTestId("quote-input")).toHaveValue("USDT")
+      expect(screen.getByTestId("exchange-input")).toHaveValue("Binance")
+
+      // Submit should work
+      await user.click(screen.getByTestId("submit"))
+
+      await waitFor(() => {
+        expect(submitHandler).toHaveBeenCalledWith({
+          tradingPairs: [{ base: "BTC", quote: "USDT", exchange: "Binance" }],
+        })
+      })
+    })
+
+    it("triggers array validation on remove with minItems constraint", async () => {
+      const user = userEvent.setup()
+
+      const ItemsField = Field.makeArrayField(
+        "items",
+        Schema.Struct({ name: Schema.String }),
+        (schema) => schema.pipe(Schema.minItems(1, { message: () => "At least one item required" })),
+      )
+      const formBuilder = FormBuilder.empty.addField(ItemsField)
+
+      const NameInput: FormReact.FieldComponent<string> = ({ field }) => (
+        <input
+          type="text"
+          value={field.value}
+          onChange={(e) => field.onChange(e.target.value)}
+          onBlur={field.onBlur}
+          data-testid="name-input"
+        />
+      )
+
+      const submitHandler = vi.fn()
+
+      const form = FormReact.make(formBuilder, {
+        fields: { items: { name: NameInput } },
+        mode: "onBlur",
+        onSubmit: (_: void, { decoded }) => submitHandler(decoded),
+      })
+
+      const SubmitButton = makeSubmitButton(form.submit, undefined)
+
+      render(
+        <form.Initialize defaultValues={{ items: [{ name: "Item 1" }] }}>
+          <form.items>
+            {({ items }) => (
+              <>
+                {items.map((_, i) => (
+                  <form.items.Item key={i} index={i}>
+                    {({ remove }) => (
+                      <div data-testid={`item-${i}`}>
+                        <form.items.name />
+                        <button type="button" onClick={remove} data-testid={`remove-${i}`}>
+                          Remove
+                        </button>
+                      </div>
+                    )}
+                  </form.items.Item>
+                ))}
+              </>
+            )}
+          </form.items>
+          <SubmitButton />
+        </form.Initialize>,
+      )
+
+      // Initially should have one item
+      expect(screen.getByTestId("name-input")).toHaveValue("Item 1")
+
+      // Remove the only item
+      await user.click(screen.getByTestId("remove-0"))
+
+      await waitFor(() => {
+        expect(screen.queryByTestId("item-0")).not.toBeInTheDocument()
+      })
+
+      // Try to submit - should fail validation
+      await user.click(screen.getByTestId("submit"))
+
+      // Submit should not have been called due to validation error
+      await waitFor(() => {
+        expect(submitHandler).not.toHaveBeenCalled()
+      }, { timeout: 1000 })
+    })
+
+    it("validates array field with minItems constraint on submit", async () => {
+      const user = userEvent.setup()
+
+      const ItemsArrayField = Field.makeArrayField(
+        "items",
+        Schema.Struct({ name: Schema.String }),
+        (schema) => schema.pipe(Schema.minItems(1, { message: () => "At least one item required" })),
+      )
+      const formBuilder = FormBuilder.empty.addField(ItemsArrayField)
+
+      const ItemNameInput: FormReact.FieldComponent<string> = ({ field }) => (
+        <input
+          type="text"
+          value={field.value}
+          onChange={(e) => field.onChange(e.target.value)}
+          onBlur={field.onBlur}
+          data-testid="item-name"
+        />
+      )
+
+      const submitHandler = vi.fn()
+
+      const form = FormReact.make(formBuilder, {
+        fields: { items: { name: ItemNameInput } },
+        onSubmit: (_: void, { decoded }) => submitHandler(decoded),
+      })
+
+      const SubmitButton = makeSubmitButton(form.submit, undefined)
+
+      // Component to display array field error
+      const ArrayError: React.FC = () => {
+        const fieldAtoms = form.getArrayField(form.fields.items)
+        const error = useAtomValue(fieldAtoms.error)
+        return Option.isSome(error) ? <span data-testid="array-error">{error.value}</span> : null
+      }
+
+      render(
+        <form.Initialize defaultValues={{ items: [{ name: "Item 1" }] }}>
+          <form.items>
+            {({ items }) => (
+              <>
+                {items.map((_, i) => (
+                  <form.items.Item key={i} index={i}>
+                    {({ remove: removeItem }) => (
+                      <>
+                        <form.items.name />
+                        <button type="button" onClick={removeItem} data-testid={`remove-${i}`}>
+                          Remove
+                        </button>
+                      </>
+                    )}
+                  </form.items.Item>
+                ))}
+              </>
+            )}
+          </form.items>
+          <ArrayError />
+          <SubmitButton />
+        </form.Initialize>,
+      )
+
+      // Initially should have one item
+      expect(screen.getAllByTestId("item-name")).toHaveLength(1)
+
+      // Remove the only item
+      await user.click(screen.getByTestId("remove-0"))
+
+      await waitFor(() => {
+        expect(screen.queryByTestId("item-name")).not.toBeInTheDocument()
+      })
+
+      // Submit should fail validation
+      await user.click(screen.getByTestId("submit"))
+
+      await waitFor(() => {
+        expect(screen.getByTestId("array-error")).toHaveTextContent("At least one item required")
+      })
+
+      expect(submitHandler).not.toHaveBeenCalled()
+    })
   })
 
   describe("async validation", () => {

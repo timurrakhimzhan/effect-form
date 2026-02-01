@@ -3,7 +3,7 @@
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.makeFieldRef = exports.isFormBuilder = exports.empty = exports.buildSchema = exports.TypeId = exports.FieldTypeId = void 0;
+exports.makeFieldRef = exports.makeArrayFieldRef = exports.isFormBuilder = exports.empty = exports.buildSchema = exports.TypeId = exports.FieldTypeId = exports.ArrayFieldTypeId = void 0;
 var Predicate = /*#__PURE__*/_interopRequireWildcard(/*#__PURE__*/require("effect/Predicate"));
 var Schema = /*#__PURE__*/_interopRequireWildcard(/*#__PURE__*/require("effect/Schema"));
 var _Field = /*#__PURE__*/require("./Field.js");
@@ -28,12 +28,19 @@ function _interopRequireWildcard(e, t) {
   })(e, t);
 }
 const FieldTypeId = exports.FieldTypeId = /*#__PURE__*/Symbol.for("@lucas-barake/effect-form/Field");
+const ArrayFieldTypeId = exports.ArrayFieldTypeId = /*#__PURE__*/Symbol.for("@lucas-barake/effect-form/ArrayField");
 const makeFieldRef = key => ({
   [FieldTypeId]: FieldTypeId,
   _S: undefined,
   key
 });
 exports.makeFieldRef = makeFieldRef;
+const makeArrayFieldRef = key => ({
+  [ArrayFieldTypeId]: ArrayFieldTypeId,
+  _S: undefined,
+  key
+});
+exports.makeArrayFieldRef = makeArrayFieldRef;
 const TypeId = exports.TypeId = /*#__PURE__*/Symbol.for("@lucas-barake/effect-form/Form");
 const FormBuilderProto = {
   [TypeId]: TypeId,
@@ -88,7 +95,7 @@ const buildSchema = self => {
   const schemaFields = {};
   for (const [key, def] of Object.entries(self.fields)) {
     if ((0, _Field.isArrayFieldDef)(def)) {
-      schemaFields[key] = Schema.Array(def.itemSchema);
+      schemaFields[key] = def.arraySchema;
     } else if ((0, _Field.isFieldDef)(def)) {
       schemaFields[key] = def.schema;
     }

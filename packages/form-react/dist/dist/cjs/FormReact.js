@@ -85,30 +85,51 @@ const makeArrayFieldComponent = (fieldKey, def, stateAtom, dirtyFieldsAtom, getO
     const formState = Option.getOrThrow(formStateOption);
     const fieldPath = arrayCtx ? `${arrayCtx.parentPath}.${fieldKey}` : fieldKey;
     const items = React.useMemo(() => (0, _Path.getNestedValue)(formState.values, fieldPath) ?? [], [formState.values, fieldPath]);
+    // Get array field atoms for triggering validation after operations
+    const arrayFieldAtoms = React.useMemo(() => getOrCreateFieldAtoms(fieldPath), [fieldPath]);
+    const triggerArrayValidation = (0, _atomReact.useAtomSet)(arrayFieldAtoms.triggerValidationAtom);
     const append = React.useCallback(value => {
       setFormState(prev => {
         if (Option.isNone(prev)) return prev;
-        return Option.some(operations.appendArrayItem(prev.value, fieldPath, def.itemSchema, value));
+        const newState = operations.appendArrayItem(prev.value, fieldPath, def.itemSchema, value);
+        // Trigger array validation after append
+        const newArrayValue = (0, _Path.getNestedValue)(newState.values, fieldPath);
+        setTimeout(() => triggerArrayValidation(newArrayValue), 0);
+        return Option.some(newState);
       });
-    }, [fieldPath, setFormState]);
+    }, [fieldPath, setFormState, triggerArrayValidation]);
     const remove = React.useCallback(index => {
       setFormState(prev => {
         if (Option.isNone(prev)) return prev;
-        return Option.some(operations.removeArrayItem(prev.value, fieldPath, index));
+        let newState = operations.removeArrayItem(prev.value, fieldPath, index);
+        // Mark array as touched since user interacted with it
+        newState = operations.setFieldTouched(newState, fieldPath, true);
+        // Trigger array validation after remove
+        const newArrayValue = (0, _Path.getNestedValue)(newState.values, fieldPath);
+        setTimeout(() => triggerArrayValidation(newArrayValue), 0);
+        return Option.some(newState);
       });
-    }, [fieldPath, setFormState]);
+    }, [fieldPath, setFormState, triggerArrayValidation]);
     const swap = React.useCallback((indexA, indexB) => {
       setFormState(prev => {
         if (Option.isNone(prev)) return prev;
-        return Option.some(operations.swapArrayItems(prev.value, fieldPath, indexA, indexB));
+        const newState = operations.swapArrayItems(prev.value, fieldPath, indexA, indexB);
+        // Trigger array validation after swap
+        const newArrayValue = (0, _Path.getNestedValue)(newState.values, fieldPath);
+        setTimeout(() => triggerArrayValidation(newArrayValue), 0);
+        return Option.some(newState);
       });
-    }, [fieldPath, setFormState]);
+    }, [fieldPath, setFormState, triggerArrayValidation]);
     const move = React.useCallback((from, to) => {
       setFormState(prev => {
         if (Option.isNone(prev)) return prev;
-        return Option.some(operations.moveArrayItem(prev.value, fieldPath, from, to));
+        const newState = operations.moveArrayItem(prev.value, fieldPath, from, to);
+        // Trigger array validation after move
+        const newArrayValue = (0, _Path.getNestedValue)(newState.values, fieldPath);
+        setTimeout(() => triggerArrayValidation(newArrayValue), 0);
+        return Option.some(newState);
       });
-    }, [fieldPath, setFormState]);
+    }, [fieldPath, setFormState, triggerArrayValidation]);
     return (0, _jsxRuntime.jsx)(_jsxRuntime.Fragment, {
       children: children({
         items,
@@ -206,6 +227,7 @@ const make = (self, options) => {
     dirtyFieldsAtom,
     fieldRefs,
     flushAutoSubmitPendingAtom,
+    getArrayField,
     getField,
     getFieldAtom,
     getOrCreateFieldAtoms,
@@ -299,6 +321,7 @@ const make = (self, options) => {
     setValue,
     getFieldAtom,
     getField,
+    getArrayField,
     mount: mountAtom,
     KeepAlive,
     ...fieldComponents

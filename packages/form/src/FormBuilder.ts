@@ -23,14 +23,30 @@ export const FieldTypeId: unique symbol = Symbol.for("@lucas-barake/effect-form/
 
 export type FieldTypeId = typeof FieldTypeId
 
+export const ArrayFieldTypeId: unique symbol = Symbol.for("@lucas-barake/effect-form/ArrayField")
+
+export type ArrayFieldTypeId = typeof ArrayFieldTypeId
+
 export interface FieldRef<S> {
   readonly [FieldTypeId]: FieldTypeId
   readonly _S: S
   readonly key: string
 }
 
+export interface ArrayFieldRef<S> {
+  readonly [ArrayFieldTypeId]: ArrayFieldTypeId
+  readonly _S: S
+  readonly key: string
+}
+
 export const makeFieldRef = <S>(key: string): FieldRef<S> => ({
   [FieldTypeId]: FieldTypeId,
+  _S: undefined as any,
+  key,
+})
+
+export const makeArrayFieldRef = <S>(key: string): ArrayFieldRef<S> => ({
+  [ArrayFieldTypeId]: ArrayFieldTypeId,
   _S: undefined as any,
   key,
 })
@@ -71,10 +87,10 @@ export interface FormBuilder<TFields extends FieldsRecord, R> {
     field: FieldDef<K, S>,
   ): FormBuilder<TFields & { readonly [key in K]: FieldDef<K, S> }, R | Schema.Schema.Context<S>>
 
-  addField<K extends string, S extends Schema.Schema.Any>(
+  addField<K extends string, S extends Schema.Schema.Any, AS extends Schema.Schema.Any>(
     this: FormBuilder<TFields, R>,
-    field: ArrayFieldDef<K, S>,
-  ): FormBuilder<TFields & { readonly [key in K]: ArrayFieldDef<K, S> }, R | Schema.Schema.Context<S>>
+    field: ArrayFieldDef<K, S, AS>,
+  ): FormBuilder<TFields & { readonly [key in K]: ArrayFieldDef<K, S, AS> }, R | Schema.Schema.Context<S> | Schema.Schema.Context<AS>>
 
   addField<K extends string, S extends Schema.Schema.Any>(
     this: FormBuilder<TFields, R>,
@@ -164,7 +180,7 @@ export const buildSchema = <TFields extends FieldsRecord, R>(
   const schemaFields: Record<string, Schema.Schema.Any> = {}
   for (const [key, def] of Object.entries(self.fields)) {
     if (isArrayFieldDef(def)) {
-      schemaFields[key] = Schema.Array(def.itemSchema)
+      schemaFields[key] = def.arraySchema
     } else if (isFieldDef(def)) {
       schemaFields[key] = def.schema
     }

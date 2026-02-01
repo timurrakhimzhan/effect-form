@@ -9,12 +9,20 @@ export interface SubmittedValues<TFields extends FieldsRecord> {
 }
 export declare const FieldTypeId: unique symbol;
 export type FieldTypeId = typeof FieldTypeId;
+export declare const ArrayFieldTypeId: unique symbol;
+export type ArrayFieldTypeId = typeof ArrayFieldTypeId;
 export interface FieldRef<S> {
     readonly [FieldTypeId]: FieldTypeId;
     readonly _S: S;
     readonly key: string;
 }
+export interface ArrayFieldRef<S> {
+    readonly [ArrayFieldTypeId]: ArrayFieldTypeId;
+    readonly _S: S;
+    readonly key: string;
+}
 export declare const makeFieldRef: <S>(key: string) => FieldRef<S>;
+export declare const makeArrayFieldRef: <S>(key: string) => ArrayFieldRef<S>;
 export declare const TypeId: unique symbol;
 export type TypeId = typeof TypeId;
 export interface FormState<TFields extends FieldsRecord> {
@@ -44,9 +52,9 @@ export interface FormBuilder<TFields extends FieldsRecord, R> {
     addField<K extends string, S extends Schema.Schema.Any>(this: FormBuilder<TFields, R>, field: FieldDef<K, S>): FormBuilder<TFields & {
         readonly [key in K]: FieldDef<K, S>;
     }, R | Schema.Schema.Context<S>>;
-    addField<K extends string, S extends Schema.Schema.Any>(this: FormBuilder<TFields, R>, field: ArrayFieldDef<K, S>): FormBuilder<TFields & {
-        readonly [key in K]: ArrayFieldDef<K, S>;
-    }, R | Schema.Schema.Context<S>>;
+    addField<K extends string, S extends Schema.Schema.Any, AS extends Schema.Schema.Any>(this: FormBuilder<TFields, R>, field: ArrayFieldDef<K, S, AS>): FormBuilder<TFields & {
+        readonly [key in K]: ArrayFieldDef<K, S, AS>;
+    }, R | Schema.Schema.Context<S> | Schema.Schema.Context<AS>>;
     addField<K extends string, S extends Schema.Schema.Any>(this: FormBuilder<TFields, R>, key: K, schema: S): FormBuilder<TFields & {
         readonly [key in K]: FieldDef<K, S>;
     }, R | Schema.Schema.Context<S>>;

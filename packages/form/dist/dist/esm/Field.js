@@ -7,10 +7,11 @@ export const makeField = (key, schema) => ({
   key,
   schema
 });
-export const makeArrayField = (key, itemSchema) => ({
+export const makeArrayField = (key, itemSchema, modify) => ({
   _tag: "array",
   key,
-  itemSchema
+  itemSchema,
+  arraySchema: modify ? modify(Schema.Array(itemSchema)) : Schema.Array(itemSchema)
 });
 export const getDefaultFromSchema = schema => {
   const ast = schema.ast;

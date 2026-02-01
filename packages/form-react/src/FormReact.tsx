@@ -44,7 +44,7 @@ export type ArrayItemComponentMap<S extends Schema.Schema.Any> = S extends Schem
 export type FieldComponentMap<TFields extends Field.FieldsRecord> = {
   readonly [K in keyof TFields]: TFields[K] extends Field.FieldDef<any, infer S>
     ? React.FC<FieldComponentProps<Schema.Schema.Encoded<S>, any>>
-    : TFields[K] extends Field.ArrayFieldDef<any, infer S> ? ArrayItemComponentMap<S>
+    : TFields[K] extends Field.ArrayFieldDef<any, infer S, any> ? ArrayItemComponentMap<S>
     : never
 }
 
@@ -84,9 +84,13 @@ export type BuiltForm<
   readonly reset: Atom.Writable<void, void>
   readonly revertToLastSubmit: Atom.Writable<void, void>
   readonly setValues: Atom.Writable<void, Field.EncodedFromFields<TFields>>
-  readonly setValue: <S>(field: FormBuilder.FieldRef<S>) => Atom.Writable<void, S | ((prev: S) => S)>
-  readonly getFieldAtom: <S>(field: FormBuilder.FieldRef<S>) => Atom.Atom<Option.Option<S>>
+  readonly setValue: <S>(field: FormBuilder.FieldRef<S> | FormBuilder.ArrayFieldRef<S>) => Atom.Writable<void, S | ((prev: S) => S)>
+  readonly getFieldAtom: {
+    <S>(field: FormBuilder.FieldRef<S>): Atom.Atom<Option.Option<S>>
+    <S>(field: FormBuilder.ArrayFieldRef<S>): Atom.Atom<Option.Option<ReadonlyArray<S>>>
+  }
   readonly getField: <S>(field: FormBuilder.FieldRef<S>) => FormAtoms.PublicFieldAtoms<S>
+  readonly getArrayField: <S>(field: FormBuilder.ArrayFieldRef<S>) => FormAtoms.PublicArrayFieldAtoms<S>
 
   readonly mount: Atom.Atom<void>
   readonly KeepAlive: React.FC
@@ -94,7 +98,7 @@ export type BuiltForm<
 
 type FieldComponents<TFields extends Field.FieldsRecord, CM extends FieldComponentMap<TFields>> = {
   readonly [K in keyof TFields]: TFields[K] extends Field.FieldDef<any, any> ? React.FC<ExtractExtraProps<CM[K]>>
-    : TFields[K] extends Field.ArrayFieldDef<any, infer S>
+    : TFields[K] extends Field.ArrayFieldDef<any, infer S, any>
       ? ArrayFieldComponent<S, ExtractArrayItemExtraProps<CM[K], S>>
     : never
 }
@@ -217,44 +221,69 @@ const makeArrayFieldComponent = <S extends Schema.Schema.Any>(
       [formState.values, fieldPath],
     )
 
+    // Get array field atoms for triggering validation after operations
+    const arrayFieldAtoms = React.useMemo(
+      () => getOrCreateFieldAtoms(fieldPath),
+      [fieldPath],
+    )
+    const triggerArrayValidation = useAtomSet(arrayFieldAtoms.triggerValidationAtom)
+
     const append = React.useCallback(
       (value?: Schema.Schema.Encoded<S>) => {
         setFormState((prev: Option.Option<FormBuilder.FormState<Field.FieldsRecord>>) => {
           if (Option.isNone(prev)) return prev
-          return Option.some(operations.appendArrayItem(prev.value, fieldPath, def.itemSchema, value))
+          const newState = operations.appendArrayItem(prev.value, fieldPath, def.itemSchema, value)
+          // Trigger array validation after append
+          const newArrayValue = getNestedValue(newState.values, fieldPath)
+          setTimeout(() => triggerArrayValidation(newArrayValue), 0)
+          return Option.some(newState)
         })
       },
-      [fieldPath, setFormState],
+      [fieldPath, setFormState, triggerArrayValidation],
     )
 
     const remove = React.useCallback(
       (index: number) => {
         setFormState((prev: Option.Option<FormBuilder.FormState<Field.FieldsRecord>>) => {
           if (Option.isNone(prev)) return prev
-          return Option.some(operations.removeArrayItem(prev.value, fieldPath, index))
+          let newState = operations.removeArrayItem(prev.value, fieldPath, index)
+          // Mark array as touched since user interacted with it
+          newState = operations.setFieldTouched(newState, fieldPath, true)
+          // Trigger array validation after remove
+          const newArrayValue = getNestedValue(newState.values, fieldPath)
+          setTimeout(() => triggerArrayValidation(newArrayValue), 0)
+          return Option.some(newState)
         })
       },
-      [fieldPath, setFormState],
+      [fieldPath, setFormState, triggerArrayValidation],
     )
 
     const swap = React.useCallback(
       (indexA: number, indexB: number) => {
         setFormState((prev: Option.Option<FormBuilder.FormState<Field.FieldsRecord>>) => {
           if (Option.isNone(prev)) return prev
-          return Option.some(operations.swapArrayItems(prev.value, fieldPath, indexA, indexB))
+          const newState = operations.swapArrayItems(prev.value, fieldPath, indexA, indexB)
+          // Trigger array validation after swap
+          const newArrayValue = getNestedValue(newState.values, fieldPath)
+          setTimeout(() => triggerArrayValidation(newArrayValue), 0)
+          return Option.some(newState)
         })
       },
-      [fieldPath, setFormState],
+      [fieldPath, setFormState, triggerArrayValidation],
     )
 
     const move = React.useCallback(
       (from: number, to: number) => {
         setFormState((prev: Option.Option<FormBuilder.FormState<Field.FieldsRecord>>) => {
           if (Option.isNone(prev)) return prev
-          return Option.some(operations.moveArrayItem(prev.value, fieldPath, from, to))
+          const newState = operations.moveArrayItem(prev.value, fieldPath, from, to)
+          // Trigger array validation after move
+          const newArrayValue = getNestedValue(newState.values, fieldPath)
+          setTimeout(() => triggerArrayValidation(newArrayValue), 0)
+          return Option.some(newState)
         })
       },
-      [fieldPath, setFormState],
+      [fieldPath, setFormState, triggerArrayValidation],
     )
 
     return <>{children({ items, append, remove, swap, move })}</>
@@ -431,6 +460,7 @@ export const make: {
     dirtyFieldsAtom,
     fieldRefs,
     flushAutoSubmitPendingAtom,
+    getArrayField,
     getField,
     getFieldAtom,
     getOrCreateFieldAtoms,
@@ -550,6 +580,7 @@ export const make: {
     setValue,
     getFieldAtom,
     getField,
+    getArrayField,
     mount: mountAtom,
     KeepAlive,
     ...fieldComponents,

@@ -2,8 +2,14 @@ import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import { isArrayFieldDef, isFieldDef, makeField } from "./Field.js";
 export const FieldTypeId = /*#__PURE__*/Symbol.for("@lucas-barake/effect-form/Field");
+export const ArrayFieldTypeId = /*#__PURE__*/Symbol.for("@lucas-barake/effect-form/ArrayField");
 export const makeFieldRef = key => ({
   [FieldTypeId]: FieldTypeId,
+  _S: undefined,
+  key
+});
+export const makeArrayFieldRef = key => ({
+  [ArrayFieldTypeId]: ArrayFieldTypeId,
   _S: undefined,
   key
 });
@@ -60,7 +66,7 @@ export const buildSchema = self => {
   const schemaFields = {};
   for (const [key, def] of Object.entries(self.fields)) {
     if (isArrayFieldDef(def)) {
-      schemaFields[key] = Schema.Array(def.itemSchema);
+      schemaFields[key] = def.arraySchema;
     } else if (isFieldDef(def)) {
       schemaFields[key] = def.schema;
     }

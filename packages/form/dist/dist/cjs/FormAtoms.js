@@ -104,6 +104,10 @@ const make = config => {
       return fieldDef.schema;
     }
     if (Field.isArrayFieldDef(fieldDef)) {
+      // If path is just the array field name (no index), return the array schema
+      if (parts[0] === rootFieldName && parts.length === 1) {
+        return fieldDef.arraySchema;
+      }
       // If there are more parts, we need to get the nested field schema
       if (parts.length > 1 && AST.isTypeLiteral(fieldDef.itemSchema.ast)) {
         const nestedFieldName = parts[1].replace(/\[\d+\]$/, "");
@@ -113,6 +117,16 @@ const make = config => {
         }
       }
       return fieldDef.itemSchema;
+    }
+    return undefined;
+  };
+  // Get the parent array field path from an item field path (e.g., "items[0].name" -> "items")
+  const getParentArrayPath = fieldPath => {
+    const parts = fieldPath.split(".");
+    const rootPart = parts[0];
+    const match = rootPart.match(/^([^[]+)\[\d+\]$/);
+    if (match) {
+      return match[1];
     }
     return undefined;
   };
@@ -221,6 +235,13 @@ const make = config => {
       const shouldValidate = parsedMode.validation === "onChange" || parsedMode.validation === "onBlur" && touched || parsedMode.validation === "onSubmit" && submitCount > 0;
       if (shouldValidate) {
         get.set(triggerValidationAtom, value);
+        // Also trigger parent array validation if this field is inside an array
+        const parentArrayPath = getParentArrayPath(fieldPath);
+        if (parentArrayPath) {
+          const arrayAtoms = getOrCreateFieldAtoms(parentArrayPath);
+          const arrayValue = (0, _Path.getNestedValue)(newState.values, parentArrayPath);
+          get.set(arrayAtoms.triggerValidationAtom, arrayValue);
+        }
       }
       // Trigger auto-submit for onChange mode (debounced)
       if (parsedMode.autoSubmit && parsedMode.validation === "onChange") {
@@ -247,6 +268,13 @@ const make = config => {
       if (parsedMode.validation === "onBlur") {
         const value = (0, _Path.getNestedValue)(currentState.values, fieldPath);
         get.set(triggerValidationAtom, value);
+        // Also trigger parent array validation if this field is inside an array
+        const parentArrayPath = getParentArrayPath(fieldPath);
+        if (parentArrayPath) {
+          const arrayAtoms = getOrCreateFieldAtoms(parentArrayPath);
+          const arrayValue = (0, _Path.getNestedValue)(currentState.values, parentArrayPath);
+          get.set(arrayAtoms.triggerValidationAtom, arrayValue);
+        }
       }
     }, {
       initialValue: undefined
@@ -302,7 +330,7 @@ const make = config => {
     }
     return result;
   })).pipe(Atom.setIdleTTL(0));
-  const fieldRefs = Object.fromEntries(Object.keys(fields).map(key => [key, FormBuilder.makeFieldRef(key)]));
+  const fieldRefs = Object.fromEntries(Object.entries(fields).map(([key, def]) => [key, Field.isArrayFieldDef(def) ? FormBuilder.makeArrayFieldRef(key) : FormBuilder.makeFieldRef(key)]));
   const operations = {
     createInitialState: defaultValues => ({
       values: defaultValues,
@@ -494,6 +522,86 @@ const make = config => {
     publicFieldAtomsRegistry.set(field.key, result);
     return result;
   };
+  const publicArrayFieldAtomsRegistry = (0, _weakRegistry.createWeakRegistry)();
+  const getArrayField = field => {
+    const existing = publicArrayFieldAtomsRegistry.get(field.key);
+    if (existing) return existing;
+    const fieldAtoms = getOrCreateFieldAtoms(field.key);
+    const fieldDef = fields[field.key];
+    if (!fieldDef || !Field.isArrayFieldDef(fieldDef)) {
+      throw new Error(`Field "${field.key}" is not an array field`);
+    }
+    // Safe value atom (returns None if form not initialized)
+    const valueAtom = Atom.readable(get => Option.map(get(stateAtom), state => (0, _Path.getNestedValue)(state.values, field.key))).pipe(Atom.setIdleTTL(0));
+    // Safe initial value atom
+    const initialValueAtom = Atom.readable(get => Option.map(get(stateAtom), state => (0, _Path.getNestedValue)(state.initialValues, field.key))).pipe(Atom.setIdleTTL(0));
+    // Touched state for each item
+    const touchedAtom = Atom.readable(get => Option.map(get(stateAtom), state => (0, _Path.getNestedValue)(state.touched, field.key) ?? [])).pipe(Atom.setIdleTTL(0));
+    // isDirty computed atom
+    const isDirtyAtom = Atom.readable(get => (0, _Path.isPathOrParentDirty)(get(dirtyFieldsAtom), field.key)).pipe(Atom.setIdleTTL(0));
+    // Append operation
+    const appendAtom = Atom.writable(() => undefined, (ctx, value) => {
+      const prev = ctx.get(stateAtom);
+      if (Option.isNone(prev)) return;
+      const newState = operations.appendArrayItem(prev.value, field.key, fieldDef.itemSchema, value);
+      ctx.set(stateAtom, Option.some(newState));
+      // Trigger validation after append
+      const arrayValue = (0, _Path.getNestedValue)(newState.values, field.key);
+      ctx.set(fieldAtoms.triggerValidationAtom, arrayValue);
+    }).pipe(Atom.setIdleTTL(0));
+    // Remove operation
+    const removeAtom = Atom.writable(() => undefined, (ctx, index) => {
+      const prev = ctx.get(stateAtom);
+      if (Option.isNone(prev)) return;
+      let newState = operations.removeArrayItem(prev.value, field.key, index);
+      newState = operations.setFieldTouched(newState, field.key, true);
+      ctx.set(stateAtom, Option.some(newState));
+      // Trigger validation after remove
+      const arrayValue = (0, _Path.getNestedValue)(newState.values, field.key);
+      ctx.set(fieldAtoms.triggerValidationAtom, arrayValue);
+    }).pipe(Atom.setIdleTTL(0));
+    // Swap operation
+    const swapAtom = Atom.writable(() => undefined, (ctx, {
+      indexA,
+      indexB
+    }) => {
+      const prev = ctx.get(stateAtom);
+      if (Option.isNone(prev)) return;
+      const newState = operations.swapArrayItems(prev.value, field.key, indexA, indexB);
+      ctx.set(stateAtom, Option.some(newState));
+      // Trigger validation after swap
+      const arrayValue = (0, _Path.getNestedValue)(newState.values, field.key);
+      ctx.set(fieldAtoms.triggerValidationAtom, arrayValue);
+    }).pipe(Atom.setIdleTTL(0));
+    // Move operation
+    const moveAtom = Atom.writable(() => undefined, (ctx, {
+      from,
+      to
+    }) => {
+      const prev = ctx.get(stateAtom);
+      if (Option.isNone(prev)) return;
+      const newState = operations.moveArrayItem(prev.value, field.key, from, to);
+      ctx.set(stateAtom, Option.some(newState));
+      // Trigger validation after move
+      const arrayValue = (0, _Path.getNestedValue)(newState.values, field.key);
+      ctx.set(fieldAtoms.triggerValidationAtom, arrayValue);
+    }).pipe(Atom.setIdleTTL(0));
+    const result = {
+      value: valueAtom,
+      initialValue: initialValueAtom,
+      error: fieldAtoms.visibleErrorAtom,
+      touched: touchedAtom,
+      isDirty: isDirtyAtom,
+      isValidating: fieldAtoms.isValidatingAtom,
+      key: field.key,
+      append: appendAtom,
+      remove: removeAtom,
+      swap: swapAtom,
+      move: moveAtom
+    };
+    publicArrayFieldAtomsRegistry.set(field.key, result);
+    return result;
+  };
   const mountAtom = Atom.readable(get => {
     get(stateAtom);
     get(errorsAtom);
@@ -598,6 +706,7 @@ const make = config => {
     setValue,
     getFieldAtom,
     getField,
+    getArrayField,
     mountAtom,
     keepAliveActiveAtom,
     initializeAtom,

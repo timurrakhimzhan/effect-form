@@ -36,10 +36,11 @@ const makeField = (key, schema) => ({
   schema
 });
 exports.makeField = makeField;
-const makeArrayField = (key, itemSchema) => ({
+const makeArrayField = (key, itemSchema, modify) => ({
   _tag: "array",
   key,
-  itemSchema
+  itemSchema,
+  arraySchema: modify ? modify(Schema.Array(itemSchema)) : Schema.Array(itemSchema)
 });
 exports.makeArrayField = makeArrayField;
 const getDefaultFromSchema = schema => {

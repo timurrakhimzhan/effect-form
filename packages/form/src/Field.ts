@@ -10,17 +10,18 @@ export interface FieldDef<K extends string, S extends Schema.Schema.Any> {
   readonly schema: S
 }
 
-export interface ArrayFieldDef<K extends string, S extends Schema.Schema.Any> {
+export interface ArrayFieldDef<K extends string, S extends Schema.Schema.Any, AS extends Schema.Schema.Any = Schema.Array$<S>> {
   readonly _tag: "array"
   readonly key: K
   readonly itemSchema: S
+  readonly arraySchema: AS
 }
 
-export type AnyFieldDef = FieldDef<string, Schema.Schema.Any> | ArrayFieldDef<string, Schema.Schema.Any>
+export type AnyFieldDef = FieldDef<string, Schema.Schema.Any> | ArrayFieldDef<string, Schema.Schema.Any, Schema.Schema.Any>
 
 export type FieldsRecord = Record<string, AnyFieldDef>
 
-export const isArrayFieldDef = (def: AnyFieldDef): def is ArrayFieldDef<string, Schema.Schema.Any> =>
+export const isArrayFieldDef = (def: AnyFieldDef): def is ArrayFieldDef<string, Schema.Schema.Any, Schema.Schema.Any> =>
   def._tag === "array"
 
 export const isFieldDef = (def: AnyFieldDef): def is FieldDef<string, Schema.Schema.Any> => def._tag === "field"
@@ -34,24 +35,26 @@ export const makeField = <K extends string, S extends Schema.Schema.Any>(
   schema,
 })
 
-export const makeArrayField = <K extends string, S extends Schema.Schema.Any>(
+export const makeArrayField = <K extends string, S extends Schema.Schema.Any, AS extends Schema.Schema.Any = Schema.Array$<S>>(
   key: K,
   itemSchema: S,
-): ArrayFieldDef<K, S> => ({
+  modify?: (schema: Schema.Array$<S>) => AS,
+): ArrayFieldDef<K, S, AS> => ({
   _tag: "array",
   key,
   itemSchema,
+  arraySchema: (modify ? modify(Schema.Array(itemSchema)) : Schema.Array(itemSchema)) as AS,
 })
 
 export type EncodedFromFields<T extends FieldsRecord> = {
   readonly [K in keyof T]: T[K] extends FieldDef<any, infer S> ? Schema.Schema.Encoded<S>
-    : T[K] extends ArrayFieldDef<any, infer S> ? ReadonlyArray<Schema.Schema.Encoded<S>>
+    : T[K] extends ArrayFieldDef<any, infer S, any> ? ReadonlyArray<Schema.Schema.Encoded<S>>
     : never
 }
 
 export type DecodedFromFields<T extends FieldsRecord> = {
   readonly [K in keyof T]: T[K] extends FieldDef<any, infer S> ? Schema.Schema.Type<S>
-    : T[K] extends ArrayFieldDef<any, infer S> ? ReadonlyArray<Schema.Schema.Type<S>>
+    : T[K] extends ArrayFieldDef<any, infer S, any> ? ReadonlyArray<Schema.Schema.Type<S>>
     : never
 }
 
