@@ -1,0 +1,53 @@
+{
+  "name": "@lucas-barake/effect-form-react",
+  "version": "0.14.0",
+  "description": "React bindings for @lucas-barake/effect-form",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lucas-barake/effect-form.git"
+  },
+  "sideEffects": [],
+  "author": "Lucas Barake",
+  "homepage": "https://github.com/lucas-barake/effect-form",
+  "dependencies": {
+    "@lucas-barake/effect-form": "workspace:^"
+  },
+  "peerDependencies": {
+    "@effect-atom/atom": "^0.4.8",
+    "@effect-atom/atom-react": "^0.4.3",
+    "effect": "^3.19.0",
+    "react": "^18.0.0 || ^19.0.0"
+  },
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/dts/index.d.ts",
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "types": "./dist/dts/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "default": "./dist/cjs/index.js"
+    },
+    "./useArrayField": {
+      "types": "./dist/dts/useArrayField.d.ts",
+      "import": "./dist/esm/useArrayField.js",
+      "default": "./dist/cjs/useArrayField.js"
+    },
+    "./useFormField": {
+      "types": "./dist/dts/useFormField.d.ts",
+      "import": "./dist/esm/useFormField.js",
+      "default": "./dist/cjs/useFormField.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "useArrayField": [
+        "./dist/dts/useArrayField.d.ts"
+      ],
+      "useFormField": [
+        "./dist/dts/useFormField.d.ts"
+      ]
+    }
+  }
+}

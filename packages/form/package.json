@@ -32,5 +32,68 @@
   "peerDependencies": {
     "@effect-atom/atom": "^0.4.8",
     "effect": "^3.19.0"
+  },
+  "main": "./dist/dist/cjs/index.js",
+  "module": "./dist/dist/esm/index.js",
+  "types": "./dist/dist/dts/index.d.ts",
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "types": "./dist/dist/dts/index.d.ts",
+      "import": "./dist/dist/esm/index.js",
+      "default": "./dist/dist/cjs/index.js"
+    },
+    "./Field": {
+      "types": "./dist/dist/dts/Field.d.ts",
+      "import": "./dist/dist/esm/Field.js",
+      "default": "./dist/dist/cjs/Field.js"
+    },
+    "./FormAtoms": {
+      "types": "./dist/dist/dts/FormAtoms.d.ts",
+      "import": "./dist/dist/esm/FormAtoms.js",
+      "default": "./dist/dist/cjs/FormAtoms.js"
+    },
+    "./FormBuilder": {
+      "types": "./dist/dist/dts/FormBuilder.d.ts",
+      "import": "./dist/dist/esm/FormBuilder.js",
+      "default": "./dist/dist/cjs/FormBuilder.js"
+    },
+    "./Mode": {
+      "types": "./dist/dist/dts/Mode.d.ts",
+      "import": "./dist/dist/esm/Mode.js",
+      "default": "./dist/dist/cjs/Mode.js"
+    },
+    "./Path": {
+      "types": "./dist/dist/dts/Path.d.ts",
+      "import": "./dist/dist/esm/Path.js",
+      "default": "./dist/dist/cjs/Path.js"
+    },
+    "./Validation": {
+      "types": "./dist/dist/dts/Validation.d.ts",
+      "import": "./dist/dist/esm/Validation.js",
+      "default": "./dist/dist/cjs/Validation.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "Field": [
+        "./dist/dist/dts/Field.d.ts"
+      ],
+      "FormAtoms": [
+        "./dist/dist/dts/FormAtoms.d.ts"
+      ],
+      "FormBuilder": [
+        "./dist/dist/dts/FormBuilder.d.ts"
+      ],
+      "Mode": [
+        "./dist/dist/dts/Mode.d.ts"
+      ],
+      "Path": [
+        "./dist/dist/dts/Path.d.ts"
+      ],
+      "Validation": [
+        "./dist/dist/dts/Validation.d.ts"
+      ]
+    }
   }
 }

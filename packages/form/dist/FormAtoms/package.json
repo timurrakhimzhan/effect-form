@@ -1,0 +1,6 @@
+{
+  "main": "../dist/cjs/FormAtoms.js",
+  "module": "../dist/esm/FormAtoms.js",
+  "types": "../dist/dts/FormAtoms.d.ts",
+  "sideEffects": []
+}

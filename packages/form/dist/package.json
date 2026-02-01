@@ -1,0 +1,80 @@
+{
+  "name": "@lucas-barake/effect-form",
+  "version": "0.14.0",
+  "description": "Type-safe form builder powered by Effect Schema",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lucas-barake/effect-form.git"
+  },
+  "sideEffects": [],
+  "author": "Lucas Barake",
+  "homepage": "https://github.com/lucas-barake/effect-form",
+  "peerDependencies": {
+    "@effect-atom/atom": "^0.4.8",
+    "effect": "^3.19.0"
+  },
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/dts/index.d.ts",
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "types": "./dist/dts/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "default": "./dist/cjs/index.js"
+    },
+    "./Field": {
+      "types": "./dist/dts/Field.d.ts",
+      "import": "./dist/esm/Field.js",
+      "default": "./dist/cjs/Field.js"
+    },
+    "./FormAtoms": {
+      "types": "./dist/dts/FormAtoms.d.ts",
+      "import": "./dist/esm/FormAtoms.js",
+      "default": "./dist/cjs/FormAtoms.js"
+    },
+    "./FormBuilder": {
+      "types": "./dist/dts/FormBuilder.d.ts",
+      "import": "./dist/esm/FormBuilder.js",
+      "default": "./dist/cjs/FormBuilder.js"
+    },
+    "./Mode": {
+      "types": "./dist/dts/Mode.d.ts",
+      "import": "./dist/esm/Mode.js",
+      "default": "./dist/cjs/Mode.js"
+    },
+    "./Path": {
+      "types": "./dist/dts/Path.d.ts",
+      "import": "./dist/esm/Path.js",
+      "default": "./dist/cjs/Path.js"
+    },
+    "./Validation": {
+      "types": "./dist/dts/Validation.d.ts",
+      "import": "./dist/esm/Validation.js",
+      "default": "./dist/cjs/Validation.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "Field": [
+        "./dist/dts/Field.d.ts"
+      ],
+      "FormAtoms": [
+        "./dist/dts/FormAtoms.d.ts"
+      ],
+      "FormBuilder": [
+        "./dist/dts/FormBuilder.d.ts"
+      ],
+      "Mode": [
+        "./dist/dts/Mode.d.ts"
+      ],
+      "Path": [
+        "./dist/dts/Path.d.ts"
+      ],
+      "Validation": [
+        "./dist/dts/Validation.d.ts"
+      ]
+    }
+  }
+}

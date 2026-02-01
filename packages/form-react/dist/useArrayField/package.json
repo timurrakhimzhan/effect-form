@@ -1,0 +1,6 @@
+{
+  "main": "../dist/cjs/useArrayField.js",
+  "module": "../dist/esm/useArrayField.js",
+  "types": "../dist/dts/useArrayField.d.ts",
+  "sideEffects": []
+}

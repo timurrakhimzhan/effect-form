@@ -1,0 +1,6 @@
+{
+  "main": "../dist/cjs/Mode.js",
+  "module": "../dist/esm/Mode.js",
+  "types": "../dist/dts/Mode.d.ts",
+  "sideEffects": []
+}

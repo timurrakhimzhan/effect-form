@@ -1,0 +1,6 @@
+{
+  "main": "../dist/cjs/FormBuilder.js",
+  "module": "../dist/esm/FormBuilder.js",
+  "types": "../dist/dts/FormBuilder.d.ts",
+  "sideEffects": []
+}
