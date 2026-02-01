@@ -34,12 +34,24 @@ export type FieldComponent<T, P = Record<string, never>> = React.FC<FieldCompone
 
 export type ExtractExtraProps<C> = C extends React.FC<FieldComponentProps<any, infer P>> ? P : Record<string, never>
 
-export type ArrayItemComponentMap<S extends Schema.Schema.Any> = S extends Schema.Struct<infer Fields> ? {
-    readonly [K in keyof Fields]: Fields[K] extends Schema.Schema.Any
-      ? React.FC<FieldComponentProps<Schema.Schema.Encoded<Fields[K]>, any>>
-      : never
-  }
-  : React.FC<FieldComponentProps<Schema.Schema.Encoded<S>, any>>
+/**
+ * Helper type to extract struct fields from a schema, handling filter/refine wrappers.
+ * Follows Effect's HasFields pattern: Schema.Struct or { [RefineSchemaId]: HasFields }
+ */
+type ExtractStructFields<S extends Schema.Schema.Any> =
+  S extends Schema.Struct<infer Fields> ? Fields
+  : S extends { readonly [Schema.RefineSchemaId]: infer From }
+    ? From extends Schema.Schema.Any ? ExtractStructFields<From> : never
+  : never
+
+export type ArrayItemComponentMap<S extends Schema.Schema.Any> =
+  ExtractStructFields<S> extends never
+    ? React.FC<FieldComponentProps<Schema.Schema.Encoded<S>, any>>
+    : {
+        readonly [K in keyof ExtractStructFields<S>]: ExtractStructFields<S>[K] extends Schema.Schema.Any
+          ? React.FC<FieldComponentProps<Schema.Schema.Encoded<ExtractStructFields<S>[K]>, any>>
+          : never
+      }
 
 export type FieldComponentMap<TFields extends Field.FieldsRecord> = {
   readonly [K in keyof TFields]: TFields[K] extends Field.FieldDef<any, infer S>
@@ -103,10 +115,10 @@ type FieldComponents<TFields extends Field.FieldsRecord, CM extends FieldCompone
     : never
 }
 
-type ExtractArrayItemExtraProps<CM, S extends Schema.Schema.Any> = S extends Schema.Struct<infer Fields>
-  ? { readonly [K in keyof Fields]: CM extends { readonly [P in K]: infer C } ? ExtractExtraProps<C> : never }
-  : CM extends React.FC<FieldComponentProps<any, infer P>> ? P
-  : never
+type ExtractArrayItemExtraProps<CM, S extends Schema.Schema.Any> =
+  ExtractStructFields<S> extends never
+    ? CM extends React.FC<FieldComponentProps<any, infer P>> ? P : never
+    : { readonly [K in keyof ExtractStructFields<S>]: CM extends { readonly [P in K]: infer C } ? ExtractExtraProps<C> : never }
 
 type ArrayFieldComponent<S extends Schema.Schema.Any, ExtraPropsMap> =
   & React.FC<{
@@ -118,12 +130,11 @@ type ArrayFieldComponent<S extends Schema.Schema.Any, ExtraPropsMap> =
       readonly children: React.ReactNode | ((props: { readonly remove: () => void }) => React.ReactNode)
     }>
   }
-  & (S extends Schema.Struct<infer Fields> ? {
-      readonly [K in keyof Fields]: React.FC<
+  & (ExtractStructFields<S> extends never ? unknown : {
+      readonly [K in keyof ExtractStructFields<S>]: React.FC<
         ExtraPropsMap extends { readonly [P in K]: infer EP } ? EP : Record<string, never>
       >
-    }
-    : unknown)
+    })
 
 interface ArrayItemContextValue {
   readonly index: number
@@ -194,6 +205,20 @@ const makeFieldComponent = <S extends Schema.Schema.Any, P>(
   return React.memo(FieldComponent) as React.FC<P>
 }
 
+/**
+ * Helper to extract TypeLiteral AST from a schema, unwrapping refinements if present.
+ * Returns the TypeLiteral if found, otherwise undefined.
+ */
+const extractTypeLiteralAST = (ast: AST.AST): AST.TypeLiteral | undefined => {
+  if (AST.isTypeLiteral(ast)) {
+    return ast
+  }
+  if (AST.isRefinement(ast)) {
+    return extractTypeLiteralAST(ast.from)
+  }
+  return undefined
+}
+
 const makeArrayFieldComponent = <S extends Schema.Schema.Any>(
   fieldKey: string,
   def: Field.ArrayFieldDef<string, S>,
@@ -206,7 +231,7 @@ const makeArrayFieldComponent = <S extends Schema.Schema.Any>(
   operations: FormAtoms.FormOperations<Field.FieldsRecord>,
   componentMap: ArrayItemComponentMap<S>,
 ): ArrayFieldComponent<S, unknown> => {
-  const isStructSchema = AST.isTypeLiteral(def.itemSchema.ast)
+  const structAST = extractTypeLiteralAST(def.itemSchema.ast)
 
   const ArrayWrapper: React.FC<{
     readonly children: (ops: ArrayFieldOperations<Schema.Schema.Encoded<S>>) => React.ReactNode
@@ -232,7 +257,9 @@ const makeArrayFieldComponent = <S extends Schema.Schema.Any>(
       (value?: Schema.Schema.Encoded<S>) => {
         setFormState((prev: Option.Option<FormBuilder.FormState<Field.FieldsRecord>>) => {
           if (Option.isNone(prev)) return prev
-          const newState = operations.appendArrayItem(prev.value, fieldPath, def.itemSchema, value)
+          let newState = operations.appendArrayItem(prev.value, fieldPath, def.itemSchema, value)
+          // Mark array as touched since user interacted with it
+          newState = operations.setFieldTouched(newState, fieldPath, true)
           // Trigger array validation after append
           const newArrayValue = getNestedValue(newState.values, fieldPath)
           setTimeout(() => triggerArrayValidation(newArrayValue), 0)
@@ -262,7 +289,9 @@ const makeArrayFieldComponent = <S extends Schema.Schema.Any>(
       (indexA: number, indexB: number) => {
         setFormState((prev: Option.Option<FormBuilder.FormState<Field.FieldsRecord>>) => {
           if (Option.isNone(prev)) return prev
-          const newState = operations.swapArrayItems(prev.value, fieldPath, indexA, indexB)
+          let newState = operations.swapArrayItems(prev.value, fieldPath, indexA, indexB)
+          // Mark array as touched since user interacted with it
+          newState = operations.setFieldTouched(newState, fieldPath, true)
           // Trigger array validation after swap
           const newArrayValue = getNestedValue(newState.values, fieldPath)
           setTimeout(() => triggerArrayValidation(newArrayValue), 0)
@@ -276,7 +305,9 @@ const makeArrayFieldComponent = <S extends Schema.Schema.Any>(
       (from: number, to: number) => {
         setFormState((prev: Option.Option<FormBuilder.FormState<Field.FieldsRecord>>) => {
           if (Option.isNone(prev)) return prev
-          const newState = operations.moveArrayItem(prev.value, fieldPath, from, to)
+          let newState = operations.moveArrayItem(prev.value, fieldPath, from, to)
+          // Mark array as touched since user interacted with it
+          newState = operations.setFieldTouched(newState, fieldPath, true)
           // Trigger array validation after move
           const newArrayValue = getNestedValue(newState.values, fieldPath)
           setTimeout(() => triggerArrayValidation(newArrayValue), 0)
@@ -328,9 +359,8 @@ const makeArrayFieldComponent = <S extends Schema.Schema.Any>(
 
   const itemFieldComponents: Record<string, React.FC> = {}
 
-  if (isStructSchema) {
-    const ast = def.itemSchema.ast as AST.TypeLiteral
-    for (const prop of ast.propertySignatures) {
+  if (structAST !== undefined) {
+    for (const prop of structAST.propertySignatures) {
       const itemKey = prop.name as string
       const itemSchema = { ast: prop.type } as Schema.Schema.Any
       const itemDef = Field.makeField(itemKey, itemSchema)

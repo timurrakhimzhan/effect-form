@@ -23,9 +23,16 @@ export interface FieldComponentProps<E, P = Record<string, never>> {
 }
 export type FieldComponent<T, P = Record<string, never>> = React.FC<FieldComponentProps<FieldValue<T>, P>>;
 export type ExtractExtraProps<C> = C extends React.FC<FieldComponentProps<any, infer P>> ? P : Record<string, never>;
-export type ArrayItemComponentMap<S extends Schema.Schema.Any> = S extends Schema.Struct<infer Fields> ? {
-    readonly [K in keyof Fields]: Fields[K] extends Schema.Schema.Any ? React.FC<FieldComponentProps<Schema.Schema.Encoded<Fields[K]>, any>> : never;
-} : React.FC<FieldComponentProps<Schema.Schema.Encoded<S>, any>>;
+/**
+ * Helper type to extract struct fields from a schema, handling filter/refine wrappers.
+ * Follows Effect's HasFields pattern: Schema.Struct or { [RefineSchemaId]: HasFields }
+ */
+type ExtractStructFields<S extends Schema.Schema.Any> = S extends Schema.Struct<infer Fields> ? Fields : S extends {
+    readonly [Schema.RefineSchemaId]: infer From;
+} ? From extends Schema.Schema.Any ? ExtractStructFields<From> : never : never;
+export type ArrayItemComponentMap<S extends Schema.Schema.Any> = ExtractStructFields<S> extends never ? React.FC<FieldComponentProps<Schema.Schema.Encoded<S>, any>> : {
+    readonly [K in keyof ExtractStructFields<S>]: ExtractStructFields<S>[K] extends Schema.Schema.Any ? React.FC<FieldComponentProps<Schema.Schema.Encoded<ExtractStructFields<S>[K]>, any>> : never;
+};
 export type FieldComponentMap<TFields extends Field.FieldsRecord> = {
     readonly [K in keyof TFields]: TFields[K] extends Field.FieldDef<any, infer S> ? React.FC<FieldComponentProps<Schema.Schema.Encoded<S>, any>> : TFields[K] extends Field.ArrayFieldDef<any, infer S, any> ? ArrayItemComponentMap<S> : never;
 };
@@ -66,11 +73,11 @@ export type BuiltForm<TFields extends Field.FieldsRecord, R, A = void, E = never
 type FieldComponents<TFields extends Field.FieldsRecord, CM extends FieldComponentMap<TFields>> = {
     readonly [K in keyof TFields]: TFields[K] extends Field.FieldDef<any, any> ? React.FC<ExtractExtraProps<CM[K]>> : TFields[K] extends Field.ArrayFieldDef<any, infer S, any> ? ArrayFieldComponent<S, ExtractArrayItemExtraProps<CM[K], S>> : never;
 };
-type ExtractArrayItemExtraProps<CM, S extends Schema.Schema.Any> = S extends Schema.Struct<infer Fields> ? {
-    readonly [K in keyof Fields]: CM extends {
+type ExtractArrayItemExtraProps<CM, S extends Schema.Schema.Any> = ExtractStructFields<S> extends never ? CM extends React.FC<FieldComponentProps<any, infer P>> ? P : never : {
+    readonly [K in keyof ExtractStructFields<S>]: CM extends {
         readonly [P in K]: infer C;
     } ? ExtractExtraProps<C> : never;
-} : CM extends React.FC<FieldComponentProps<any, infer P>> ? P : never;
+};
 type ArrayFieldComponent<S extends Schema.Schema.Any, ExtraPropsMap> = React.FC<{
     readonly children: (ops: ArrayFieldOperations<Schema.Schema.Encoded<S>>) => React.ReactNode;
 }> & {
@@ -80,11 +87,11 @@ type ArrayFieldComponent<S extends Schema.Schema.Any, ExtraPropsMap> = React.FC<
             readonly remove: () => void;
         }) => React.ReactNode);
     }>;
-} & (S extends Schema.Struct<infer Fields> ? {
-    readonly [K in keyof Fields]: React.FC<ExtraPropsMap extends {
+} & (ExtractStructFields<S> extends never ? unknown : {
+    readonly [K in keyof ExtractStructFields<S>]: React.FC<ExtraPropsMap extends {
         readonly [P in K]: infer EP;
     } ? EP : Record<string, never>>;
-} : unknown);
+});
 export declare const make: {
     <TFields extends Field.FieldsRecord, A, E, SubmitArgs = void, CM extends FieldComponentMap<TFields> = FieldComponentMap<TFields>>(self: FormBuilder.FormBuilder<TFields, never>, options: {
         readonly runtime?: Atom.AtomRuntime<never, never>;

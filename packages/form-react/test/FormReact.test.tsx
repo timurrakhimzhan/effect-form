@@ -576,6 +576,242 @@ describe("FormReact.make", () => {
       })
     })
 
+    it("append() marks array field as touched", async () => {
+      const user = userEvent.setup()
+
+      const ItemsArrayField = Field.makeArrayField("items", Schema.Struct({ name: Schema.String }))
+      const formBuilder = FormBuilder.empty.addField(ItemsArrayField)
+
+      const ItemNameInput: FormReact.FieldComponent<string> = ({ field }) => (
+        <input
+          type="text"
+          value={field.value}
+          onChange={(e) => field.onChange(e.target.value)}
+          onBlur={field.onBlur}
+          data-testid="item-name"
+        />
+      )
+
+      const form = FormReact.make(formBuilder, {
+        fields: { items: { name: ItemNameInput } },
+        onSubmit: () => {},
+      })
+
+      const ArrayTouchedDisplay: React.FC = () => {
+        const fieldAtoms = form.getArrayField(form.fields.items)
+        const isTouched = useAtomValue(fieldAtoms.touched)
+        return <span data-testid="array-touched">{String(isTouched)}</span>
+      }
+
+      render(
+        <form.Initialize defaultValues={{ items: [] }}>
+          <form.items>
+            {({ items, append }) => (
+              <>
+                {items.map((_, i) => (
+                  <form.items.Item key={i} index={i}>
+                    <form.items.name />
+                  </form.items.Item>
+                ))}
+                <button type="button" onClick={() => append()} data-testid="add">
+                  Add
+                </button>
+              </>
+            )}
+          </form.items>
+          <ArrayTouchedDisplay />
+        </form.Initialize>,
+      )
+
+      // Initially not touched
+      expect(screen.getByTestId("array-touched")).toHaveTextContent("false")
+
+      // Append an item
+      await user.click(screen.getByTestId("add"))
+
+      // Array should now be touched
+      await waitFor(() => {
+        expect(screen.getByTestId("array-touched")).toHaveTextContent("true")
+      })
+    })
+
+    it("remove() marks array field as touched", async () => {
+      const user = userEvent.setup()
+
+      const ItemsArrayField = Field.makeArrayField("items", Schema.Struct({ name: Schema.String }))
+      const formBuilder = FormBuilder.empty.addField(ItemsArrayField)
+
+      const ItemNameInput: FormReact.FieldComponent<string> = ({ field }) => (
+        <input
+          type="text"
+          value={field.value}
+          onChange={(e) => field.onChange(e.target.value)}
+          onBlur={field.onBlur}
+          data-testid="item-name"
+        />
+      )
+
+      const form = FormReact.make(formBuilder, {
+        fields: { items: { name: ItemNameInput } },
+        onSubmit: () => {},
+      })
+
+      const ArrayTouchedDisplay: React.FC = () => {
+        const fieldAtoms = form.getArrayField(form.fields.items)
+        const isTouched = useAtomValue(fieldAtoms.touched)
+        return <span data-testid="array-touched">{String(isTouched)}</span>
+      }
+
+      render(
+        <form.Initialize defaultValues={{ items: [{ name: "Item 1" }] }}>
+          <form.items>
+            {({ items, remove }) => (
+              <>
+                {items.map((_, i) => (
+                  <form.items.Item key={i} index={i}>
+                    <form.items.name />
+                  </form.items.Item>
+                ))}
+                <button type="button" onClick={() => remove(0)} data-testid="remove">
+                  Remove
+                </button>
+              </>
+            )}
+          </form.items>
+          <ArrayTouchedDisplay />
+        </form.Initialize>,
+      )
+
+      // Initially not touched
+      expect(screen.getByTestId("array-touched")).toHaveTextContent("false")
+
+      // Remove an item
+      await user.click(screen.getByTestId("remove"))
+
+      // Array should now be touched
+      await waitFor(() => {
+        expect(screen.getByTestId("array-touched")).toHaveTextContent("true")
+      })
+    })
+
+    it("swap() marks array field as touched", async () => {
+      const user = userEvent.setup()
+
+      const ItemsArrayField = Field.makeArrayField("items", Schema.Struct({ name: Schema.String }))
+      const formBuilder = FormBuilder.empty.addField(ItemsArrayField)
+
+      const ItemNameInput: FormReact.FieldComponent<string> = ({ field }) => (
+        <input
+          type="text"
+          value={field.value}
+          onChange={(e) => field.onChange(e.target.value)}
+          onBlur={field.onBlur}
+          data-testid="item-name"
+        />
+      )
+
+      const form = FormReact.make(formBuilder, {
+        fields: { items: { name: ItemNameInput } },
+        onSubmit: () => {},
+      })
+
+      const ArrayTouchedDisplay: React.FC = () => {
+        const fieldAtoms = form.getArrayField(form.fields.items)
+        const isTouched = useAtomValue(fieldAtoms.touched)
+        return <span data-testid="array-touched">{String(isTouched)}</span>
+      }
+
+      render(
+        <form.Initialize defaultValues={{ items: [{ name: "A" }, { name: "B" }] }}>
+          <form.items>
+            {({ items, swap }) => (
+              <>
+                {items.map((_, i) => (
+                  <form.items.Item key={i} index={i}>
+                    <form.items.name />
+                  </form.items.Item>
+                ))}
+                <button type="button" onClick={() => swap(0, 1)} data-testid="swap">
+                  Swap
+                </button>
+              </>
+            )}
+          </form.items>
+          <ArrayTouchedDisplay />
+        </form.Initialize>,
+      )
+
+      // Initially not touched
+      expect(screen.getByTestId("array-touched")).toHaveTextContent("false")
+
+      // Swap items
+      await user.click(screen.getByTestId("swap"))
+
+      // Array should now be touched
+      await waitFor(() => {
+        expect(screen.getByTestId("array-touched")).toHaveTextContent("true")
+      })
+    })
+
+    it("move() marks array field as touched", async () => {
+      const user = userEvent.setup()
+
+      const ItemsArrayField = Field.makeArrayField("items", Schema.Struct({ name: Schema.String }))
+      const formBuilder = FormBuilder.empty.addField(ItemsArrayField)
+
+      const ItemNameInput: FormReact.FieldComponent<string> = ({ field }) => (
+        <input
+          type="text"
+          value={field.value}
+          onChange={(e) => field.onChange(e.target.value)}
+          onBlur={field.onBlur}
+          data-testid="item-name"
+        />
+      )
+
+      const form = FormReact.make(formBuilder, {
+        fields: { items: { name: ItemNameInput } },
+        onSubmit: () => {},
+      })
+
+      const ArrayTouchedDisplay: React.FC = () => {
+        const fieldAtoms = form.getArrayField(form.fields.items)
+        const isTouched = useAtomValue(fieldAtoms.touched)
+        return <span data-testid="array-touched">{String(isTouched)}</span>
+      }
+
+      render(
+        <form.Initialize defaultValues={{ items: [{ name: "A" }, { name: "B" }, { name: "C" }] }}>
+          <form.items>
+            {({ items, move }) => (
+              <>
+                {items.map((_, i) => (
+                  <form.items.Item key={i} index={i}>
+                    <form.items.name />
+                  </form.items.Item>
+                ))}
+                <button type="button" onClick={() => move(0, 2)} data-testid="move">
+                  Move
+                </button>
+              </>
+            )}
+          </form.items>
+          <ArrayTouchedDisplay />
+        </form.Initialize>,
+      )
+
+      // Initially not touched
+      expect(screen.getByTestId("array-touched")).toHaveTextContent("false")
+
+      // Move item
+      await user.click(screen.getByTestId("move"))
+
+      // Array should now be touched
+      await waitFor(() => {
+        expect(screen.getByTestId("array-touched")).toHaveTextContent("true")
+      })
+    })
+
     it("ItemWrapper remove triggers array validation with minItems in onBlur mode", async () => {
       const user = userEvent.setup()
 
@@ -822,6 +1058,195 @@ describe("FormReact.make", () => {
       await waitFor(() => {
         expect(submitHandler).not.toHaveBeenCalled()
       }, { timeout: 1000 })
+    })
+
+    it("supports filtered struct schemas in array fields (Schema.filter wrapping struct)", async () => {
+      const user = userEvent.setup()
+
+      // This tests the fix for ArrayItemComponentMap not recognizing filtered structs
+      const TradingPairSchema = Schema.Struct({
+        base: Schema.String,
+        quote: Schema.String,
+        exchange: Schema.String,
+      }).pipe(
+        Schema.filter((pair) => {
+          if (pair.base === pair.quote) {
+            return "Base and quote must be different"
+          }
+        }),
+      )
+
+      const TradingPairsField = Field.makeArrayField("tradingPairs", TradingPairSchema)
+      const formBuilder = FormBuilder.empty.addField(TradingPairsField)
+
+      const BaseInput: FormReact.FieldComponent<string> = ({ field }) => (
+        <input
+          type="text"
+          value={field.value}
+          onChange={(e) => field.onChange(e.target.value)}
+          onBlur={field.onBlur}
+          data-testid="base-input"
+        />
+      )
+
+      const QuoteInput: FormReact.FieldComponent<string> = ({ field }) => (
+        <input
+          type="text"
+          value={field.value}
+          onChange={(e) => field.onChange(e.target.value)}
+          onBlur={field.onBlur}
+          data-testid="quote-input"
+        />
+      )
+
+      const ExchangeInput: FormReact.FieldComponent<string> = ({ field }) => (
+        <input
+          type="text"
+          value={field.value}
+          onChange={(e) => field.onChange(e.target.value)}
+          onBlur={field.onBlur}
+          data-testid="exchange-input"
+        />
+      )
+
+      const submitHandler = vi.fn()
+
+      // The key test: component map should accept struct field components
+      // even when the schema is wrapped with Schema.filter()
+      const form = FormReact.make(formBuilder, {
+        fields: {
+          tradingPairs: {
+            base: BaseInput,
+            quote: QuoteInput,
+            exchange: ExchangeInput,
+          },
+        },
+        onSubmit: (_: void, { decoded }) => submitHandler(decoded),
+      })
+
+      const SubmitButton = makeSubmitButton(form.submit, undefined)
+
+      render(
+        <form.Initialize defaultValues={{ tradingPairs: [{ base: "BTC", quote: "USDT", exchange: "Binance" }] }}>
+          <form.tradingPairs>
+            {({ items, append }) => (
+              <>
+                {items.map((_, i) => (
+                  <form.tradingPairs.Item key={i} index={i}>
+                    <div data-testid={`pair-${i}`}>
+                      <form.tradingPairs.base />
+                      <form.tradingPairs.quote />
+                      <form.tradingPairs.exchange />
+                    </div>
+                  </form.tradingPairs.Item>
+                ))}
+                <button type="button" onClick={() => append()} data-testid="add">
+                  Add
+                </button>
+              </>
+            )}
+          </form.tradingPairs>
+          <SubmitButton />
+        </form.Initialize>,
+      )
+
+      // Verify all struct fields render correctly
+      expect(screen.getByTestId("base-input")).toHaveValue("BTC")
+      expect(screen.getByTestId("quote-input")).toHaveValue("USDT")
+      expect(screen.getByTestId("exchange-input")).toHaveValue("Binance")
+
+      // Verify editing works
+      await user.clear(screen.getByTestId("base-input"))
+      await user.type(screen.getByTestId("base-input"), "ETH")
+
+      expect(screen.getByTestId("base-input")).toHaveValue("ETH")
+
+      // Verify submit works with valid data
+      await user.click(screen.getByTestId("submit"))
+
+      await waitFor(() => {
+        expect(submitHandler).toHaveBeenCalledWith({
+          tradingPairs: [{ base: "ETH", quote: "USDT", exchange: "Binance" }],
+        })
+      })
+    })
+
+    it("supports nested filter wrappers on struct schemas", async () => {
+      const user = userEvent.setup()
+
+      // Test multiple levels of filter wrapping
+      const ItemSchema = Schema.Struct({
+        name: Schema.String,
+        value: Schema.String,
+      })
+        .pipe(Schema.filter((item) => item.name.length > 0 || "Name required"))
+        .pipe(Schema.filter((item) => item.value.length > 0 || "Value required"))
+
+      const ItemsField = Field.makeArrayField("items", ItemSchema)
+      const formBuilder = FormBuilder.empty.addField(ItemsField)
+
+      const NameInput: FormReact.FieldComponent<string> = ({ field }) => (
+        <input
+          type="text"
+          value={field.value}
+          onChange={(e) => field.onChange(e.target.value)}
+          onBlur={field.onBlur}
+          data-testid="name-input"
+        />
+      )
+
+      const ValueInput: FormReact.FieldComponent<string> = ({ field }) => (
+        <input
+          type="text"
+          value={field.value}
+          onChange={(e) => field.onChange(e.target.value)}
+          onBlur={field.onBlur}
+          data-testid="value-input"
+        />
+      )
+
+      const submitHandler = vi.fn()
+
+      const form = FormReact.make(formBuilder, {
+        fields: {
+          items: {
+            name: NameInput,
+            value: ValueInput,
+          },
+        },
+        onSubmit: (_: void, { decoded }) => submitHandler(decoded),
+      })
+
+      const SubmitButton = makeSubmitButton(form.submit, undefined)
+
+      render(
+        <form.Initialize defaultValues={{ items: [{ name: "Test", value: "123" }] }}>
+          <form.items>
+            {({ items }) => (
+              <>
+                {items.map((_, i) => (
+                  <form.items.Item key={i} index={i}>
+                    <form.items.name />
+                    <form.items.value />
+                  </form.items.Item>
+                ))}
+              </>
+            )}
+          </form.items>
+          <SubmitButton />
+        </form.Initialize>,
+      )
+
+      expect(screen.getByTestId("name-input")).toHaveValue("Test")
+      expect(screen.getByTestId("value-input")).toHaveValue("123")
+
+      await user.click(screen.getByTestId("submit"))
+
+      await waitFor(() => {
+        expect(submitHandler).toHaveBeenCalledWith({
+          items: [{ name: "Test", value: "123" }],
+        })
+      })
     })
 
     it("validates array field with minItems constraint on submit", async () => {

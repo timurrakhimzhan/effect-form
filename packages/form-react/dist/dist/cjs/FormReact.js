@@ -75,8 +75,21 @@ const makeFieldComponent = (fieldKey, _fieldDef, dirtyFieldsAtom, getOrCreateFie
   };
   return React.memo(FieldComponent);
 };
+/**
+ * Helper to extract TypeLiteral AST from a schema, unwrapping refinements if present.
+ * Returns the TypeLiteral if found, otherwise undefined.
+ */
+const extractTypeLiteralAST = ast => {
+  if (AST.isTypeLiteral(ast)) {
+    return ast;
+  }
+  if (AST.isRefinement(ast)) {
+    return extractTypeLiteralAST(ast.from);
+  }
+  return undefined;
+};
 const makeArrayFieldComponent = (fieldKey, def, stateAtom, dirtyFieldsAtom, getOrCreateFieldAtoms, operations, componentMap) => {
-  const isStructSchema = AST.isTypeLiteral(def.itemSchema.ast);
+  const structAST = extractTypeLiteralAST(def.itemSchema.ast);
   const ArrayWrapper = ({
     children
   }) => {
@@ -91,7 +104,9 @@ const makeArrayFieldComponent = (fieldKey, def, stateAtom, dirtyFieldsAtom, getO
     const append = React.useCallback(value => {
       setFormState(prev => {
         if (Option.isNone(prev)) return prev;
-        const newState = operations.appendArrayItem(prev.value, fieldPath, def.itemSchema, value);
+        let newState = operations.appendArrayItem(prev.value, fieldPath, def.itemSchema, value);
+        // Mark array as touched since user interacted with it
+        newState = operations.setFieldTouched(newState, fieldPath, true);
         // Trigger array validation after append
         const newArrayValue = (0, _Path.getNestedValue)(newState.values, fieldPath);
         setTimeout(() => triggerArrayValidation(newArrayValue), 0);
@@ -113,7 +128,9 @@ const makeArrayFieldComponent = (fieldKey, def, stateAtom, dirtyFieldsAtom, getO
     const swap = React.useCallback((indexA, indexB) => {
       setFormState(prev => {
         if (Option.isNone(prev)) return prev;
-        const newState = operations.swapArrayItems(prev.value, fieldPath, indexA, indexB);
+        let newState = operations.swapArrayItems(prev.value, fieldPath, indexA, indexB);
+        // Mark array as touched since user interacted with it
+        newState = operations.setFieldTouched(newState, fieldPath, true);
         // Trigger array validation after swap
         const newArrayValue = (0, _Path.getNestedValue)(newState.values, fieldPath);
         setTimeout(() => triggerArrayValidation(newArrayValue), 0);
@@ -123,7 +140,9 @@ const makeArrayFieldComponent = (fieldKey, def, stateAtom, dirtyFieldsAtom, getO
     const move = React.useCallback((from, to) => {
       setFormState(prev => {
         if (Option.isNone(prev)) return prev;
-        const newState = operations.moveArrayItem(prev.value, fieldPath, from, to);
+        let newState = operations.moveArrayItem(prev.value, fieldPath, from, to);
+        // Mark array as touched since user interacted with it
+        newState = operations.setFieldTouched(newState, fieldPath, true);
         // Trigger array validation after move
         const newArrayValue = (0, _Path.getNestedValue)(newState.values, fieldPath);
         setTimeout(() => triggerArrayValidation(newArrayValue), 0);
@@ -174,9 +193,8 @@ const makeArrayFieldComponent = (fieldKey, def, stateAtom, dirtyFieldsAtom, getO
     });
   };
   const itemFieldComponents = {};
-  if (isStructSchema) {
-    const ast = def.itemSchema.ast;
-    for (const prop of ast.propertySignatures) {
+  if (structAST !== undefined) {
+    for (const prop of structAST.propertySignatures) {
       const itemKey = prop.name;
       const itemSchema = {
         ast: prop.type
