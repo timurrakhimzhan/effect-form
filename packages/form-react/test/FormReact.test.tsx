@@ -576,6 +576,81 @@ describe("FormReact.make", () => {
       })
     })
 
+    it("ItemWrapper remove triggers array validation with minItems in onBlur mode", async () => {
+      const user = userEvent.setup()
+
+      const ItemsArrayField = Field.makeArrayField(
+        "items",
+        Schema.Struct({ name: Schema.String }),
+        (schema) => schema.pipe(Schema.minItems(1, { message: () => "At least one item required" })),
+      )
+      const formBuilder = FormBuilder.empty.addField(ItemsArrayField)
+
+      const ItemNameInput: FormReact.FieldComponent<string> = ({ field }) => (
+        <input
+          type="text"
+          value={field.value}
+          onChange={(e) => field.onChange(e.target.value)}
+          onBlur={field.onBlur}
+          data-testid="item-name"
+        />
+      )
+
+      const form = FormReact.make(formBuilder, {
+        fields: { items: { name: ItemNameInput } },
+        mode: "onBlur",
+        onSubmit: () => {},
+      })
+
+      // Component to display array field error
+      const ArrayError: React.FC = () => {
+        const fieldAtoms = form.getArrayField(form.fields.items)
+        const error = useAtomValue(fieldAtoms.error)
+        return Option.isSome(error) ? <span data-testid="array-error">{error.value}</span> : null
+      }
+
+      render(
+        <form.Initialize defaultValues={{ items: [{ name: "Item 1" }] }}>
+          <form.items>
+            {({ items }) => (
+              <>
+                {items.map((_, i) => (
+                  <form.items.Item key={i} index={i}>
+                    {({ remove }) => (
+                      <div data-testid={`item-${i}`}>
+                        <form.items.name />
+                        <button type="button" onClick={remove} data-testid={`item-remove-${i}`}>
+                          Remove
+                        </button>
+                      </div>
+                    )}
+                  </form.items.Item>
+                ))}
+              </>
+            )}
+          </form.items>
+          <ArrayError />
+        </form.Initialize>,
+      )
+
+      // Initially should have one item, no error
+      expect(screen.getByTestId("item-name")).toHaveValue("Item 1")
+      expect(screen.queryByTestId("array-error")).not.toBeInTheDocument()
+
+      // Remove the only item using ItemWrapper's remove (render prop)
+      await user.click(screen.getByTestId("item-remove-0"))
+
+      // Array should be empty
+      await waitFor(() => {
+        expect(screen.queryByTestId("item-0")).not.toBeInTheDocument()
+      })
+
+      // Error should show because ItemWrapper's remove now triggers validation
+      await waitFor(() => {
+        expect(screen.getByTestId("array-error")).toHaveTextContent("At least one item required")
+      })
+    })
+
     it("validates array field with multiple subfields and minItems constraint", async () => {
       const user = userEvent.setup()
 

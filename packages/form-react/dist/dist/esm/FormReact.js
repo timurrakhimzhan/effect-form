@@ -122,12 +122,21 @@ const makeArrayFieldComponent = (fieldKey, def, stateAtom, dirtyFieldsAtom, getO
     const setFormState = useAtomSet(stateAtom);
     const parentPath = arrayCtx ? `${arrayCtx.parentPath}.${fieldKey}` : fieldKey;
     const itemPath = `${parentPath}[${index}]`;
+    // Get array field atoms for triggering validation after remove
+    const arrayFieldAtoms = React.useMemo(() => getOrCreateFieldAtoms(parentPath), [parentPath]);
+    const triggerArrayValidation = useAtomSet(arrayFieldAtoms.triggerValidationAtom);
     const remove = React.useCallback(() => {
       setFormState(prev => {
         if (Option.isNone(prev)) return prev;
-        return Option.some(operations.removeArrayItem(prev.value, parentPath, index));
+        let newState = operations.removeArrayItem(prev.value, parentPath, index);
+        // Mark array as touched since user interacted with it
+        newState = operations.setFieldTouched(newState, parentPath, true);
+        // Trigger array validation after remove
+        const newArrayValue = getNestedValue(newState.values, parentPath);
+        setTimeout(() => triggerArrayValidation(newArrayValue), 0);
+        return Option.some(newState);
       });
-    }, [parentPath, index, setFormState]);
+    }, [parentPath, index, setFormState, triggerArrayValidation]);
     return _jsx(ArrayItemContext.Provider, {
       value: {
         index,
