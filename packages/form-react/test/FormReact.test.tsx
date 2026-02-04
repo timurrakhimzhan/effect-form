@@ -2627,6 +2627,55 @@ describe("FormReact.make", () => {
       expect(isDirty).toBe(false)
     })
 
+    it("isDirty becomes true again after returning to initial and changing value", async () => {
+      const user = userEvent.setup()
+
+      const NameField = Field.makeField("name", Schema.String)
+      const formBuilder = FormBuilder.empty.addField(NameField)
+
+      const onSubmit = () => {}
+
+      const form = FormReact.make(formBuilder, {
+        fields: { name: TextInput },
+        onSubmit,
+      })
+
+      let isDirty: boolean | undefined
+
+      const TestComponent = () => {
+        useAtomSubscribe(form.isDirty, (v) => {
+          isDirty = v
+        }, { immediate: true })
+        return null
+      }
+
+      render(
+        <form.Initialize defaultValues={{ name: "initial" }}>
+          <form.name />
+          <TestComponent />
+        </form.Initialize>,
+      )
+
+      expect(isDirty).toBe(false)
+
+      const input = screen.getByTestId("text-input")
+
+      // Change value - becomes dirty
+      await user.clear(input)
+      await user.type(input, "changed")
+      expect(isDirty).toBe(true)
+
+      // Return to initial - becomes clean
+      await user.clear(input)
+      await user.type(input, "initial")
+      expect(isDirty).toBe(false)
+
+      // Change again - becomes dirty again
+      await user.clear(input)
+      await user.type(input, "new value")
+      expect(isDirty).toBe(true)
+    })
+
     it("isDirty remains after successful submission", async () => {
       const user = userEvent.setup()
 
@@ -2726,6 +2775,234 @@ describe("FormReact.make", () => {
         expect(screen.getByTestId("text-input")).toHaveValue("initial")
         expect(screen.getByTestId("isDirty")).toHaveTextContent("false")
         expect(screen.getByTestId("submitResultTag")).toHaveTextContent("Initial")
+      })
+    })
+  })
+
+  describe("setError", () => {
+    it("sets a custom error message on a field after submit", async () => {
+      const user = userEvent.setup()
+      const NameField = Field.makeField("name", Schema.String)
+      const formBuilder = FormBuilder.empty.addField(NameField)
+
+      const onSubmit = () => {}
+
+      const form = FormReact.make(formBuilder, {
+        fields: { name: TextInput },
+        mode: "onSubmit",
+        onSubmit,
+      })
+
+      const TestComponent = () => {
+        const nameFieldAtoms = form.getField(form.fields.name)
+        const error = useAtomValue(nameFieldAtoms.error)
+        const setError = useAtomSet(nameFieldAtoms.setError)
+        const submit = useAtomSet(form.submit)
+        return (
+          <>
+            <span data-testid="setError-display">{Option.isSome(error) ? error.value : "none"}</span>
+            <button onClick={() => setError("Custom error")} data-testid="setError">Set Error</button>
+            <button onClick={() => submit()} data-testid="submit">Submit</button>
+          </>
+        )
+      }
+
+      render(
+        <form.Initialize defaultValues={{ name: "test" }}>
+          <form.name />
+          <TestComponent />
+        </form.Initialize>,
+      )
+
+      expect(screen.getByTestId("setError-display")).toHaveTextContent("none")
+
+      // Submit first so errors become visible (onSubmit mode requires submitCount > 0)
+      await user.click(screen.getByTestId("submit"))
+      await waitFor(() => {
+        expect(screen.getByTestId("setError-display")).toHaveTextContent("none")
+      })
+
+      // Now set error - should be visible because submitCount > 0
+      await user.click(screen.getByTestId("setError"))
+
+      await waitFor(() => {
+        expect(screen.getByTestId("setError-display")).toHaveTextContent("Custom error")
+      })
+    })
+
+    it("clears the error when setError(undefined) is called", async () => {
+      const user = userEvent.setup()
+      const NameField = Field.makeField("name", Schema.String)
+      const formBuilder = FormBuilder.empty.addField(NameField)
+
+      const onSubmit = () => {}
+
+      const form = FormReact.make(formBuilder, {
+        fields: { name: TextInput },
+        mode: "onSubmit",
+        onSubmit,
+      })
+
+      const TestComponent = () => {
+        const nameFieldAtoms = form.getField(form.fields.name)
+        const error = useAtomValue(nameFieldAtoms.error)
+        const setError = useAtomSet(nameFieldAtoms.setError)
+        const submit = useAtomSet(form.submit)
+        return (
+          <>
+            <span data-testid="setError-display">{Option.isSome(error) ? error.value : "none"}</span>
+            <button onClick={() => setError("Custom error")} data-testid="setError">Set Error</button>
+            <button onClick={() => setError(undefined)} data-testid="clearError">Clear Error</button>
+            <button onClick={() => submit()} data-testid="submit">Submit</button>
+          </>
+        )
+      }
+
+      render(
+        <form.Initialize defaultValues={{ name: "test" }}>
+          <form.name />
+          <TestComponent />
+        </form.Initialize>,
+      )
+
+      // Submit first so errors become visible
+      await user.click(screen.getByTestId("submit"))
+
+      await user.click(screen.getByTestId("setError"))
+      await waitFor(() => {
+        expect(screen.getByTestId("setError-display")).toHaveTextContent("Custom error")
+      })
+
+      await user.click(screen.getByTestId("clearError"))
+      await waitFor(() => {
+        expect(screen.getByTestId("setError-display")).toHaveTextContent("none")
+      })
+    })
+
+    it("does not affect isDirty or isTouched", async () => {
+      const user = userEvent.setup()
+      const NameField = Field.makeField("name", Schema.String)
+      const formBuilder = FormBuilder.empty.addField(NameField)
+
+      const onSubmit = () => {}
+
+      const form = FormReact.make(formBuilder, {
+        fields: { name: TextInput },
+        mode: "onSubmit",
+        onSubmit,
+      })
+
+      const TestComponent = () => {
+        const nameFieldAtoms = form.getField(form.fields.name)
+        const error = useAtomValue(nameFieldAtoms.error)
+        const isDirty = useAtomValue(nameFieldAtoms.isDirty)
+        const isTouched = useAtomValue(nameFieldAtoms.isTouched)
+        const setError = useAtomSet(nameFieldAtoms.setError)
+        const submit = useAtomSet(form.submit)
+        return (
+          <>
+            <span data-testid="setError-display">{Option.isSome(error) ? error.value : "none"}</span>
+            <span data-testid="isDirty">{String(isDirty)}</span>
+            <span data-testid="isTouched">{String(isTouched)}</span>
+            <button onClick={() => setError("Custom error")} data-testid="setError">Set Error</button>
+            <button onClick={() => submit()} data-testid="submit">Submit</button>
+          </>
+        )
+      }
+
+      render(
+        <form.Initialize defaultValues={{ name: "test" }}>
+          <form.name />
+          <TestComponent />
+        </form.Initialize>,
+      )
+
+      expect(screen.getByTestId("isDirty")).toHaveTextContent("false")
+      expect(screen.getByTestId("isTouched")).toHaveTextContent("false")
+      expect(screen.getByTestId("setError-display")).toHaveTextContent("none")
+
+      // Submit first so errors become visible
+      await user.click(screen.getByTestId("submit"))
+
+      await user.click(screen.getByTestId("setError"))
+
+      await waitFor(() => {
+        expect(screen.getByTestId("setError-display")).toHaveTextContent("Custom error")
+      })
+
+      // isDirty should still be false - setError doesn't affect it
+      // Note: isTouched becomes true after submit (all fields get touched)
+      expect(screen.getByTestId("isDirty")).toHaveTextContent("false")
+    })
+
+    it("setError works on array fields", async () => {
+      const user = userEvent.setup()
+      const ItemsArrayField = Field.makeArrayField("items", Schema.Struct({ name: Schema.String }))
+      const formBuilder = FormBuilder.empty.addField(ItemsArrayField)
+
+      const onSubmit = () => {}
+
+      const ItemNameInput: FormReact.FieldComponent<string> = ({ field }) => (
+        <input
+          type="text"
+          value={field.value}
+          onChange={(e) => field.onChange(e.target.value)}
+          onBlur={field.onBlur}
+          data-testid="item-name"
+        />
+      )
+
+      const form = FormReact.make(formBuilder, {
+        fields: { items: { name: ItemNameInput } },
+        mode: "onSubmit",
+        onSubmit,
+      })
+
+      const TestComponent = () => {
+        const itemsFieldAtoms = form.getArrayField(form.fields.items)
+        const error = useAtomValue(itemsFieldAtoms.error)
+        const setError = useAtomSet(itemsFieldAtoms.setError)
+        const submit = useAtomSet(form.submit)
+        return (
+          <>
+            <span data-testid="arrayError">{Option.isSome(error) ? error.value : "none"}</span>
+            <button onClick={() => setError("Array error")} data-testid="setArrayError">Set Array Error</button>
+            <button onClick={() => setError(undefined)} data-testid="clearArrayError">Clear Array Error</button>
+            <button onClick={() => submit()} data-testid="submit">Submit</button>
+          </>
+        )
+      }
+
+      render(
+        <form.Initialize defaultValues={{ items: [{ name: "Item 1" }] }}>
+          <form.items>
+            {({ items }) => (
+              <>
+                {items.map((_, i) => (
+                  <form.items.Item key={i} index={i}>
+                    <form.items.name />
+                  </form.items.Item>
+                ))}
+              </>
+            )}
+          </form.items>
+          <TestComponent />
+        </form.Initialize>,
+      )
+
+      expect(screen.getByTestId("arrayError")).toHaveTextContent("none")
+
+      // Submit first so errors become visible
+      await user.click(screen.getByTestId("submit"))
+
+      await user.click(screen.getByTestId("setArrayError"))
+      await waitFor(() => {
+        expect(screen.getByTestId("arrayError")).toHaveTextContent("Array error")
+      })
+
+      await user.click(screen.getByTestId("clearArrayError"))
+      await waitFor(() => {
+        expect(screen.getByTestId("arrayError")).toHaveTextContent("none")
       })
     })
   })

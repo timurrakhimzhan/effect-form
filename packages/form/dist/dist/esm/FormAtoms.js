@@ -484,8 +484,8 @@ export const make = config => {
     // Manual validation - bypasses debounce, validates immediately
     const fieldSchema = getFieldSchema(field.key);
     const validateAtom = runtime.fn()((_, get) => Effect.gen(function* () {
-      const state = get(stateAtom);
-      if (Option.isNone(state)) {
+      const valueOption = get(valueAtom);
+      if (Option.isNone(valueOption)) {
         return Option.none();
       }
       // No schema = always valid
@@ -495,7 +495,7 @@ export const make = config => {
           error: Option.none()
         });
       }
-      const value = getNestedValue(state.value.values, field.key);
+      const value = valueOption.value;
       // Validate without debounce
       const result = yield* pipe(Schema.decodeUnknown(fieldSchema)(value), Effect.tap(() => Effect.sync(() => {
         // Clear field error on success
@@ -527,6 +527,19 @@ export const make = config => {
       })));
       return result;
     })).pipe(Atom.setIdleTTL(0));
+    const setErrorAtom = Atom.writable(() => undefined, (ctx, message) => {
+      const currentErrors = ctx.get(errorsAtom);
+      const newErrors = new Map(currentErrors);
+      if (message === undefined) {
+        newErrors.delete(field.key);
+      } else {
+        newErrors.set(field.key, {
+          message,
+          source: "field"
+        });
+      }
+      ctx.set(errorsAtom, newErrors);
+    }).pipe(Atom.setIdleTTL(0));
     const result = {
       value: valueAtom,
       initialValue: initialValueAtom,
@@ -538,6 +551,7 @@ export const make = config => {
       onChange: typedOnChangeAtom,
       onBlur: fieldAtoms.onBlurAtom,
       validate: validateAtom,
+      setError: setErrorAtom,
       key: field.key
     };
     publicFieldAtomsRegistry.set(field.key, result);
@@ -610,11 +624,11 @@ export const make = config => {
     // Manual validation - bypasses debounce, validates immediately
     const arraySchema = fieldDef.arraySchema;
     const validateAtom = runtime.fn()((_, get) => Effect.gen(function* () {
-      const state = get(stateAtom);
-      if (Option.isNone(state)) {
+      const valueOption = get(valueAtom);
+      if (Option.isNone(valueOption)) {
         return Option.none();
       }
-      const value = getNestedValue(state.value.values, field.key);
+      const value = valueOption.value;
       // Validate without debounce
       const result = yield* pipe(Schema.decodeUnknown(arraySchema)(value), Effect.tap(() => Effect.sync(() => {
         // Clear field error on success
@@ -646,6 +660,19 @@ export const make = config => {
       })));
       return result;
     })).pipe(Atom.setIdleTTL(0));
+    const setErrorAtom = Atom.writable(() => undefined, (ctx, message) => {
+      const currentErrors = ctx.get(errorsAtom);
+      const newErrors = new Map(currentErrors);
+      if (message === undefined) {
+        newErrors.delete(field.key);
+      } else {
+        newErrors.set(field.key, {
+          message,
+          source: "field"
+        });
+      }
+      ctx.set(errorsAtom, newErrors);
+    }).pipe(Atom.setIdleTTL(0));
     const result = {
       value: valueAtom,
       initialValue: initialValueAtom,
@@ -655,6 +682,7 @@ export const make = config => {
       isValidating: fieldAtoms.isValidatingAtom,
       key: field.key,
       validate: validateAtom,
+      setError: setErrorAtom,
       append: appendAtom,
       remove: removeAtom,
       swap: swapAtom,

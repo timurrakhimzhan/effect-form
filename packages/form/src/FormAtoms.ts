@@ -52,6 +52,8 @@ export interface PublicFieldAtoms<S> {
   readonly onBlur: Atom.Writable<void, void>
   /** Manually trigger validation and get the result. Returns None if form not initialized. */
   readonly validate: Atom.AtomResultFn<void, Option.Option<ValidationResult>, never>
+  /** Programmatically set or clear the field error */
+  readonly setError: Atom.Writable<void, string | undefined>
   /** The field's path/key */
   readonly key: string
 }
@@ -99,6 +101,8 @@ export interface PublicArrayFieldAtoms<S> {
   readonly move: Atom.Writable<void, { from: number; to: number }>
   /** Manually trigger validation and get the result. Returns None if form not initialized. */
   readonly validate: Atom.AtomResultFn<void, Option.Option<ValidationResult>, never>
+  /** Programmatically set or clear the field error */
+  readonly setError: Atom.Writable<void, string | undefined>
 }
 
 export interface FormAtomsConfig<TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = void> {
@@ -994,8 +998,8 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
     const fieldSchema = getFieldSchema(field.key)
     const validateAtom = runtime.fn<void>()((_: void, get) =>
       Effect.gen(function*() {
-        const state = get(stateAtom)
-        if (Option.isNone(state)) {
+        const valueOption = get(valueAtom)
+        if (Option.isNone(valueOption)) {
           return Option.none<ValidationResult>()
         }
 
@@ -1004,7 +1008,7 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
           return Option.some({ isValid: true, error: Option.none<string>() } as ValidationResult)
         }
 
-        const value = getNestedValue(state.value.values, field.key)
+        const value = valueOption.value
 
         // Validate without debounce
         const result = yield* pipe(
@@ -1041,6 +1045,20 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
       })
     ).pipe(Atom.setIdleTTL(0)) as Atom.AtomResultFn<void, Option.Option<ValidationResult>, never>
 
+    const setErrorAtom = Atom.writable(
+      () => undefined as void,
+      (ctx, message: string | undefined) => {
+        const currentErrors = ctx.get(errorsAtom)
+        const newErrors = new Map(currentErrors)
+        if (message === undefined) {
+          newErrors.delete(field.key)
+        } else {
+          newErrors.set(field.key, { message, source: "field" as const })
+        }
+        ctx.set(errorsAtom, newErrors)
+      },
+    ).pipe(Atom.setIdleTTL(0))
+
     const result: PublicFieldAtoms<S> = {
       value: valueAtom,
       initialValue: initialValueAtom,
@@ -1052,6 +1070,7 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
       onChange: typedOnChangeAtom,
       onBlur: fieldAtoms.onBlurAtom,
       validate: validateAtom,
+      setError: setErrorAtom,
       key: field.key,
     }
 
@@ -1155,12 +1174,12 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
     const arraySchema = fieldDef.arraySchema
     const validateAtom = runtime.fn<void>()((_: void, get) =>
       Effect.gen(function*() {
-        const state = get(stateAtom)
-        if (Option.isNone(state)) {
+        const valueOption = get(valueAtom)
+        if (Option.isNone(valueOption)) {
           return Option.none<ValidationResult>()
         }
 
-        const value = getNestedValue(state.value.values, field.key)
+        const value = valueOption.value
 
         // Validate without debounce
         const result = yield* pipe(
@@ -1197,6 +1216,20 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
       })
     ).pipe(Atom.setIdleTTL(0)) as Atom.AtomResultFn<void, Option.Option<ValidationResult>, never>
 
+    const setErrorAtom = Atom.writable(
+      () => undefined as void,
+      (ctx, message: string | undefined) => {
+        const currentErrors = ctx.get(errorsAtom)
+        const newErrors = new Map(currentErrors)
+        if (message === undefined) {
+          newErrors.delete(field.key)
+        } else {
+          newErrors.set(field.key, { message, source: "field" as const })
+        }
+        ctx.set(errorsAtom, newErrors)
+      },
+    ).pipe(Atom.setIdleTTL(0))
+
     const result: PublicArrayFieldAtoms<S> = {
       value: valueAtom,
       initialValue: initialValueAtom,
@@ -1206,6 +1239,7 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
       isValidating: fieldAtoms.isValidatingAtom,
       key: field.key,
       validate: validateAtom,
+      setError: setErrorAtom,
       append: appendAtom,
       remove: removeAtom,
       swap: swapAtom,

@@ -2,6 +2,213 @@
 
 Type-safe forms powered by Effect Schema.
 
+## What is Changed
+
+This section documents recent additions and improvements to the library.
+
+### New: `getField()` API
+
+Access all atoms for a non-array field outside of the generated field components. Useful for building custom UI, conditional logic, or subscribing to field state in external components.
+
+```tsx
+const emailField = form.getField(form.fields.email)
+
+// Subscribe to individual atoms
+const error = useAtomValue(emailField.error)
+const isDirty = useAtomValue(emailField.isDirty)
+const isTouched = useAtomValue(emailField.isTouched)
+const isValidating = useAtomValue(emailField.isValidating)
+const value = useAtomValue(emailField.value) // Option<T>
+const initialValue = useAtomValue(emailField.initialValue) // Option<T>
+
+// Programmatically update
+const setEmail = useAtomSet(emailField.setValue)
+setEmail("new@email.com")
+setEmail((prev) => prev.toUpperCase()) // functional update
+
+// Trigger onChange/onBlur handlers
+const triggerChange = useAtomSet(emailField.onChange)
+const triggerBlur = useAtomSet(emailField.onBlur)
+```
+
+**Available atoms in `PublicFieldAtoms<S>`:**
+
+| Atom | Type | Description |
+|------|------|-------------|
+| `value` | `Atom<Option<S>>` | Current value (None if form not initialized) |
+| `initialValue` | `Atom<Option<S>>` | Initial value the field was initialized with |
+| `error` | `Atom<Option<string>>` | Visible error message (respects validation mode) |
+| `isTouched` | `Atom<boolean>` | Whether the field has been blurred |
+| `isDirty` | `Atom<boolean>` | Whether value differs from initial |
+| `isValidating` | `Atom<boolean>` | Whether async validation is in progress |
+| `setValue` | `Writable<void, S \| (S => S)>` | Programmatically set value |
+| `onChange` | `Writable<void, S>` | Trigger onChange handler |
+| `onBlur` | `Writable<void, void>` | Trigger onBlur handler |
+| `validate` | `AtomResultFn<void, Option<ValidationResult>>` | Manual validation (see below) |
+| `key` | `string` | The field's path/key |
+
+### New: `getArrayField()` API
+
+Access all atoms for an array field, including array-specific operations.
+
+```tsx
+const itemsField = form.getArrayField(form.fields.items)
+
+// Subscribe to array state
+const items = useAtomValue(itemsField.value) // Option<ReadonlyArray<S>>
+const error = useAtomValue(itemsField.error) // e.g., minItems validation error
+const touched = useAtomValue(itemsField.touched) // per-item touched state
+const isDirty = useAtomValue(itemsField.isDirty)
+
+// Array operations as atoms
+const append = useAtomSet(itemsField.append)
+const remove = useAtomSet(itemsField.remove)
+const swap = useAtomSet(itemsField.swap)
+const move = useAtomSet(itemsField.move)
+
+// Usage
+append({ name: "New Item" }) // append with value
+append() // append with default value
+remove(0) // remove at index
+swap({ indexA: 0, indexB: 1 }) // swap indices
+move({ from: 0, to: 2 }) // move item
+```
+
+**Available atoms in `PublicArrayFieldAtoms<S>`:**
+
+| Atom | Type | Description |
+|------|------|-------------|
+| `value` | `Atom<Option<ReadonlyArray<S>>>` | Current array value |
+| `initialValue` | `Atom<Option<ReadonlyArray<S>>>` | Initial array value |
+| `error` | `Atom<Option<string>>` | Array-level error (e.g., minItems) |
+| `touched` | `Atom<Option<boolean \| ReadonlyArray<ItemTouched>>>` | Touched state |
+| `isDirty` | `Atom<boolean>` | Whether array differs from initial |
+| `isValidating` | `Atom<boolean>` | Async validation in progress |
+| `append` | `Writable<void, S \| undefined>` | Append item |
+| `remove` | `Writable<void, number>` | Remove at index |
+| `swap` | `Writable<void, { indexA: number; indexB: number }>` | Swap items |
+| `move` | `Writable<void, { from: number; to: number }>` | Move item |
+| `validate` | `AtomResultFn<void, Option<ValidationResult>>` | Manual validation |
+| `key` | `string` | The array field's path/key |
+
+### New: Manual Validation (`validate`)
+
+Both `getField()` and `getArrayField()` expose a `validate` atom that triggers validation immediately, bypassing any configured debounce. Useful for custom validation workflows or validating before specific user actions.
+
+```tsx
+const emailField = form.getField(form.fields.email)
+const validate = useAtomSet(emailField.validate)
+const validationResult = useAtomValue(emailField.validate)
+
+async function handleCustomAction() {
+  // Trigger immediate validation
+  validate()
+
+  // The result contains isValid and error
+  // Option.None if form not initialized
+  // Option.Some({ isValid: boolean, error: Option<string> }) after validation
+}
+
+// Example: Validate on custom event
+function ValidateButton() {
+  const validate = useAtomSet(emailField.validate)
+  const result = useAtomValue(emailField.validate)
+
+  return (
+    <>
+      <button onClick={() => validate()}>Check Email</button>
+      {result.waiting && <span>Validating...</span>}
+      {Option.isSome(result.value) && result.value.value.isValid && <span>Valid!</span>}
+    </>
+  )
+}
+```
+
+**`ValidationResult` interface:**
+
+```ts
+interface ValidationResult {
+  readonly isValid: boolean
+  readonly error: Option<string>
+}
+```
+
+### New: Schema.filter Support for Array Items
+
+Array items can now use `Schema.filter` or refinements. The library correctly extracts the underlying struct fields from filtered/refined schemas.
+
+```tsx
+const ItemSchema = Schema.Struct({
+  name: Schema.String,
+  quantity: Schema.Number,
+}).pipe(
+  Schema.filter((item) => {
+    if (item.quantity < 1) {
+      return { path: ["quantity"], message: "Quantity must be at least 1" }
+    }
+  })
+)
+
+const orderForm = FormBuilder.empty
+  .addField(Field.makeArrayField("items", ItemSchema))
+
+// Field components for array items work correctly with filtered schemas
+const form = FormReact.make(orderForm, {
+  fields: {
+    items: {
+      name: NameInput,
+      quantity: QuantityInput,
+    },
+  },
+  onSubmit: (_, { decoded }) => Effect.log("Order submitted"),
+})
+```
+
+### Improved: Decoupled Debounce and Auto-Submit
+
+The auto-submit logic has been refactored for better control and reliability:
+
+- **Debounce is now separate from auto-submit triggering** - Validation debounce and auto-submit debounce work independently
+- **Pending change tracking** - Changes made during an in-flight submit are queued and submitted after the current submit completes
+- **Request ID tracking** - Each auto-submit request has a unique ID, preventing duplicate submissions
+- **onBlur auto-submit is immediate** - When using `{ onBlur: { autoSubmit: true } }`, submit triggers on blur without debounce
+
+```tsx
+// onChange auto-submit with debounce
+FormReact.make(formBuilder, {
+  fields,
+  mode: { onChange: { debounce: "300 millis", autoSubmit: true } },
+  onSubmit,
+})
+
+// onBlur auto-submit (immediate, no debounce)
+FormReact.make(formBuilder, {
+  fields,
+  mode: { onBlur: { autoSubmit: true } },
+  onSubmit,
+})
+```
+
+**Behavior during submit:**
+1. User makes changes while submit is in progress
+2. Changes are tracked as "pending"
+3. When current submit completes, pending changes trigger a new debounced submit
+4. This ensures no changes are lost while maintaining debounce behavior
+
+### Improved: Array Field Validation on Remove
+
+Array validation is now correctly triggered when items are removed. Previously, removing an item wouldn't re-validate the array constraint (e.g., `minItems`).
+
+```tsx
+const ItemsSchema = Schema.Array(ItemSchema).pipe(
+  Schema.minItems(1, { message: () => "At least one item required" })
+)
+
+// Removing the last item now correctly shows the minItems error
+```
+
+---
+
 ## Installation
 
 ```bash

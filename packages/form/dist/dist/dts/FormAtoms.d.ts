@@ -45,6 +45,8 @@ export interface PublicFieldAtoms<S> {
     readonly onBlur: Atom.Writable<void, void>;
     /** Manually trigger validation and get the result. Returns None if form not initialized. */
     readonly validate: Atom.AtomResultFn<void, Option.Option<ValidationResult>, never>;
+    /** Programmatically set or clear the field error */
+    readonly setError: Atom.Writable<void, string | undefined>;
     /** The field's path/key */
     readonly key: string;
 }
@@ -96,6 +98,8 @@ export interface PublicArrayFieldAtoms<S> {
     }>;
     /** Manually trigger validation and get the result. Returns None if form not initialized. */
     readonly validate: Atom.AtomResultFn<void, Option.Option<ValidationResult>, never>;
+    /** Programmatically set or clear the field error */
+    readonly setError: Atom.Writable<void, string | undefined>;
 }
 export interface FormAtomsConfig<TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = void> {
     readonly runtime: Atom.AtomRuntime<R, any>;
