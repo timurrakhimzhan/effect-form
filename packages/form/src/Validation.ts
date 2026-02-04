@@ -8,6 +8,7 @@ export type ErrorSource = "field" | "refinement"
 export interface ErrorEntry {
   readonly message: string
   readonly source: ErrorSource
+  readonly forceVisible?: boolean
 }
 
 const getBaseAST = (ast: AST.AST): AST.AST => {

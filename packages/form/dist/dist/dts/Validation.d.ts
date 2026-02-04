@@ -4,6 +4,7 @@ export type ErrorSource = "field" | "refinement";
 export interface ErrorEntry {
     readonly message: string;
     readonly source: ErrorSource;
+    readonly forceVisible?: boolean;
 }
 export declare const extractFirstError: (error: ParseResult.ParseError) => Option.Option<string>;
 export declare const routeErrors: (error: ParseResult.ParseError) => Map<string, string>;

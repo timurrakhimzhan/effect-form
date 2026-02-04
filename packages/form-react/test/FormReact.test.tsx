@@ -3005,5 +3005,252 @@ describe("FormReact.make", () => {
         expect(screen.getByTestId("arrayError")).toHaveTextContent("none")
       })
     })
+
+    it("setError with forceVisible: true shows error without submit (onSubmit mode)", async () => {
+      const user = userEvent.setup()
+      const NameField = Field.makeField("name", Schema.String)
+      const formBuilder = FormBuilder.empty.addField(NameField)
+
+      const onSubmit = () => {}
+
+      const form = FormReact.make(formBuilder, {
+        fields: { name: TextInput },
+        mode: "onSubmit",
+        onSubmit,
+      })
+
+      const TestComponent = () => {
+        const nameFieldAtoms = form.getField(form.fields.name)
+        const error = useAtomValue(nameFieldAtoms.error)
+        const setError = useAtomSet(nameFieldAtoms.setError)
+        return (
+          <>
+            <span data-testid="error-display">{Option.isSome(error) ? error.value : "none"}</span>
+            <button
+              onClick={() => setError({ message: "Forced error", forceVisible: true })}
+              data-testid="setForceError"
+            >
+              Set Forced Error
+            </button>
+            <button onClick={() => setError("Normal error")} data-testid="setNormalError">Set Normal Error</button>
+            <button onClick={() => setError(undefined)} data-testid="clearError">Clear Error</button>
+          </>
+        )
+      }
+
+      render(
+        <form.Initialize defaultValues={{ name: "test" }}>
+          <form.name />
+          <TestComponent />
+        </form.Initialize>,
+      )
+
+      expect(screen.getByTestId("error-display")).toHaveTextContent("none")
+
+      // Set normal error - should NOT be visible (no submit yet in onSubmit mode)
+      await user.click(screen.getByTestId("setNormalError"))
+      await waitFor(() => {
+        expect(screen.getByTestId("error-display")).toHaveTextContent("none")
+      })
+
+      // Clear and set forced error - should be visible even without submit
+      await user.click(screen.getByTestId("clearError"))
+      await user.click(screen.getByTestId("setForceError"))
+
+      await waitFor(() => {
+        expect(screen.getByTestId("error-display")).toHaveTextContent("Forced error")
+      })
+    })
+
+    it("forceVisible error is cleared when setError(undefined) is called", async () => {
+      const user = userEvent.setup()
+      const NameField = Field.makeField("name", Schema.String)
+      const formBuilder = FormBuilder.empty.addField(NameField)
+
+      const onSubmit = () => {}
+
+      const form = FormReact.make(formBuilder, {
+        fields: { name: TextInput },
+        mode: "onSubmit",
+        onSubmit,
+      })
+
+      const TestComponent = () => {
+        const nameFieldAtoms = form.getField(form.fields.name)
+        const error = useAtomValue(nameFieldAtoms.error)
+        const setError = useAtomSet(nameFieldAtoms.setError)
+        return (
+          <>
+            <span data-testid="error-display">{Option.isSome(error) ? error.value : "none"}</span>
+            <button
+              onClick={() => setError({ message: "Forced error", forceVisible: true })}
+              data-testid="setForceError"
+            >
+              Set Forced Error
+            </button>
+            <button onClick={() => setError(undefined)} data-testid="clearError">Clear Error</button>
+          </>
+        )
+      }
+
+      render(
+        <form.Initialize defaultValues={{ name: "test" }}>
+          <form.name />
+          <TestComponent />
+        </form.Initialize>,
+      )
+
+      // Set forced error
+      await user.click(screen.getByTestId("setForceError"))
+      await waitFor(() => {
+        expect(screen.getByTestId("error-display")).toHaveTextContent("Forced error")
+      })
+
+      // Clear error
+      await user.click(screen.getByTestId("clearError"))
+      await waitFor(() => {
+        expect(screen.getByTestId("error-display")).toHaveTextContent("none")
+      })
+    })
+
+    it("validate with forceVisible: true shows error without submit (onSubmit mode)", async () => {
+      const user = userEvent.setup()
+      const NonEmpty = Schema.String.pipe(Schema.minLength(1, { message: () => "Required" }))
+      const NameField = Field.makeField("name", NonEmpty)
+      const formBuilder = FormBuilder.empty.addField(NameField)
+
+      const onSubmit = () => {}
+
+      const form = FormReact.make(formBuilder, {
+        fields: { name: TextInput },
+        mode: "onSubmit",
+        onSubmit,
+      })
+
+      const TestComponent = () => {
+        const nameFieldAtoms = form.getField(form.fields.name)
+        const error = useAtomValue(nameFieldAtoms.error)
+        const validate = useAtomSet(nameFieldAtoms.validate)
+        return (
+          <>
+            <span data-testid="error-display">{Option.isSome(error) ? error.value : "none"}</span>
+            <button onClick={() => validate({ forceVisible: true })} data-testid="validateForced">
+              Validate (Forced)
+            </button>
+            <button onClick={() => validate()} data-testid="validateNormal">Validate (Normal)</button>
+          </>
+        )
+      }
+
+      render(
+        <form.Initialize defaultValues={{ name: "" }}>
+          <form.name />
+          <TestComponent />
+        </form.Initialize>,
+      )
+
+      expect(screen.getByTestId("error-display")).toHaveTextContent("none")
+
+      // Normal validate - should NOT show error (no submit yet in onSubmit mode)
+      await user.click(screen.getByTestId("validateNormal"))
+      await waitFor(() => {
+        // Error exists in errorsAtom but not visible due to mode
+        expect(screen.getByTestId("error-display")).toHaveTextContent("none")
+      })
+
+      // Forced validate - should show error even without submit
+      await user.click(screen.getByTestId("validateForced"))
+
+      await waitFor(() => {
+        expect(screen.getByTestId("error-display")).toHaveTextContent("Required")
+      })
+    })
+  })
+
+  describe("validate atom subscription behavior", () => {
+    it("get.result causes infinite loop when combined with get.set in derived atom (async validation)", async () => {
+      // Schema with async validation (filterEffect with delay)
+      const AsyncNameSchema = Schema.String.pipe(
+        Schema.minLength(1),
+        Schema.filterEffect(() =>
+          Effect.gen(function*() {
+            yield* Effect.sleep("10 millis")
+            return true
+          })
+        ),
+      )
+
+      const NameField = Field.makeField("name", AsyncNameSchema)
+      const formBuilder = FormBuilder.empty.addField(NameField)
+
+      const onSubmit = () => {}
+
+      const runtime = Atom.runtime(Layer.empty)
+      const form = FormReact.make(formBuilder, {
+        runtime,
+        fields: { name: TextInput },
+        onSubmit,
+      })
+
+      let validationTriggerCount = 0
+
+      // This atom pattern causes infinite loops with async validation:
+      // - get.set triggers async validation
+      // - get.result subscribes to result
+      // - when result changes (Waiting -> Success), subscription fires
+      // - atom re-computes, triggers validation again
+      const isValidAtom = runtime.atom((get) =>
+        Effect.gen(function*() {
+          const fieldAtoms = form.getField(form.fields.name)
+          const value = get(fieldAtoms.value)
+
+          if (Option.isNone(value)) {
+            return false
+          }
+
+          const isTouched = get(fieldAtoms.isTouched)
+
+          if (isTouched) {
+            return Option.isNone(get(fieldAtoms.error))
+          }
+
+          // This combination causes infinite loop with async validation:
+          validationTriggerCount++
+          get.set(fieldAtoms.validate, {})
+          const result = yield* get.result(fieldAtoms.validate, { suspendOnWaiting: true })
+
+          return Option.match(result, {
+            onNone: () => false,
+            onSome: (r) => r.isValid,
+          })
+        })
+      )
+
+      const TestComponent = () => {
+        const isValidResult = useAtomValue(isValidAtom)
+        return (
+          <div>
+            <span data-testid="isValid">
+              {Result.isSuccess(isValidResult) ? String(isValidResult.value) : "pending"}
+            </span>
+            <span data-testid="triggerCount">{validationTriggerCount}</span>
+          </div>
+        )
+      }
+
+      render(
+        <form.Initialize defaultValues={{ name: "test" }}>
+          <form.name />
+          <TestComponent />
+        </form.Initialize>,
+      )
+
+      // Wait to see if infinite loop occurs
+      await new Promise((resolve) => setTimeout(resolve, 500))
+
+      // If infinite loop, validationTriggerCount will be very high
+      // With 10ms validation delay, 500ms could allow ~50 iterations if looping
+      expect(validationTriggerCount).toBeLessThan(10)
+    })
   })
 })

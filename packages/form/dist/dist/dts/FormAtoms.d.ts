@@ -44,9 +44,14 @@ export interface PublicFieldAtoms<S> {
     /** Trigger onBlur handler (sets touched + triggers validation if mode is onBlur) */
     readonly onBlur: Atom.Writable<void, void>;
     /** Manually trigger validation and get the result. Returns None if form not initialized. */
-    readonly validate: Atom.AtomResultFn<void, Option.Option<ValidationResult>, never>;
+    readonly validate: Atom.AtomResultFn<{
+        forceVisible?: boolean;
+    } | void, Option.Option<ValidationResult>, never>;
     /** Programmatically set or clear the field error */
-    readonly setError: Atom.Writable<void, string | undefined>;
+    readonly setError: Atom.Writable<void, string | {
+        message: string;
+        forceVisible?: boolean;
+    } | undefined>;
     /** The field's path/key */
     readonly key: string;
 }
@@ -97,9 +102,14 @@ export interface PublicArrayFieldAtoms<S> {
         to: number;
     }>;
     /** Manually trigger validation and get the result. Returns None if form not initialized. */
-    readonly validate: Atom.AtomResultFn<void, Option.Option<ValidationResult>, never>;
+    readonly validate: Atom.AtomResultFn<{
+        forceVisible?: boolean;
+    } | void, Option.Option<ValidationResult>, never>;
     /** Programmatically set or clear the field error */
-    readonly setError: Atom.Writable<void, string | undefined>;
+    readonly setError: Atom.Writable<void, string | {
+        message: string;
+        forceVisible?: boolean;
+    } | undefined>;
 }
 export interface FormAtomsConfig<TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = void> {
     readonly runtime: Atom.AtomRuntime<R, any>;

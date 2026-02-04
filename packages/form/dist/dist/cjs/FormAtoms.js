@@ -215,6 +215,10 @@ const make = config => {
     const visibleErrorAtom = Atom.readable(get => {
       const error = get(errorAtom);
       if (Option.isNone(error)) return Option.none();
+      // Force visible bypasses mode checks
+      if (error.value.forceVisible) {
+        return Option.some(error.value.message);
+      }
       const touched = get(touchedAtom);
       const submitCount = get(submitCountAtom);
       const dirtyFields = get(dirtyFieldsAtom);
@@ -509,7 +513,8 @@ const make = config => {
     const typedOnChangeAtom = Atom.writable(() => undefined, (ctx, value) => ctx.set(fieldAtoms.onChangeAtom, value)).pipe(Atom.setIdleTTL(0));
     // Manual validation - bypasses debounce, validates immediately
     const fieldSchema = getFieldSchema(field.key);
-    const validateAtom = runtime.fn()((_, get) => Effect.gen(function* () {
+    const validateAtom = runtime.fn()((options, get) => Effect.gen(function* () {
+      const forceVisible = options?.forceVisible;
       const valueOption = get(valueAtom);
       if (Option.isNone(valueOption)) {
         return Option.none();
@@ -542,7 +547,8 @@ const make = config => {
           const newErrors = new Map(currentErrors);
           newErrors.set(field.key, {
             message: errorMessage.value,
-            source: "field"
+            source: "field",
+            forceVisible
           });
           get.set(errorsAtom, newErrors);
         }
@@ -553,15 +559,18 @@ const make = config => {
       })));
       return result;
     })).pipe(Atom.setIdleTTL(0));
-    const setErrorAtom = Atom.writable(() => undefined, (ctx, message) => {
+    const setErrorAtom = Atom.writable(() => undefined, (ctx, param) => {
       const currentErrors = ctx.get(errorsAtom);
       const newErrors = new Map(currentErrors);
-      if (message === undefined) {
+      if (param === undefined) {
         newErrors.delete(field.key);
       } else {
+        const message = typeof param === "string" ? param : param.message;
+        const forceVisible = typeof param === "string" ? undefined : param.forceVisible;
         newErrors.set(field.key, {
           message,
-          source: "field"
+          source: "field",
+          forceVisible
         });
       }
       ctx.set(errorsAtom, newErrors);
@@ -649,7 +658,8 @@ const make = config => {
     }).pipe(Atom.setIdleTTL(0));
     // Manual validation - bypasses debounce, validates immediately
     const arraySchema = fieldDef.arraySchema;
-    const validateAtom = runtime.fn()((_, get) => Effect.gen(function* () {
+    const validateAtom = runtime.fn()((options, get) => Effect.gen(function* () {
+      const forceVisible = options?.forceVisible;
       const valueOption = get(valueAtom);
       if (Option.isNone(valueOption)) {
         return Option.none();
@@ -675,7 +685,8 @@ const make = config => {
           const newErrors = new Map(currentErrors);
           newErrors.set(field.key, {
             message: errorMessage.value,
-            source: "field"
+            source: "field",
+            forceVisible
           });
           get.set(errorsAtom, newErrors);
         }
@@ -686,15 +697,18 @@ const make = config => {
       })));
       return result;
     })).pipe(Atom.setIdleTTL(0));
-    const setErrorAtom = Atom.writable(() => undefined, (ctx, message) => {
+    const setErrorAtom = Atom.writable(() => undefined, (ctx, param) => {
       const currentErrors = ctx.get(errorsAtom);
       const newErrors = new Map(currentErrors);
-      if (message === undefined) {
+      if (param === undefined) {
         newErrors.delete(field.key);
       } else {
+        const message = typeof param === "string" ? param : param.message;
+        const forceVisible = typeof param === "string" ? undefined : param.forceVisible;
         newErrors.set(field.key, {
           message,
-          source: "field"
+          source: "field",
+          forceVisible
         });
       }
       ctx.set(errorsAtom, newErrors);

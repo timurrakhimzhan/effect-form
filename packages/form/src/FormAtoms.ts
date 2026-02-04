@@ -51,9 +51,9 @@ export interface PublicFieldAtoms<S> {
   /** Trigger onBlur handler (sets touched + triggers validation if mode is onBlur) */
   readonly onBlur: Atom.Writable<void, void>
   /** Manually trigger validation and get the result. Returns None if form not initialized. */
-  readonly validate: Atom.AtomResultFn<void, Option.Option<ValidationResult>, never>
+  readonly validate: Atom.AtomResultFn<{ forceVisible?: boolean } | void, Option.Option<ValidationResult>, never>
   /** Programmatically set or clear the field error */
-  readonly setError: Atom.Writable<void, string | undefined>
+  readonly setError: Atom.Writable<void, string | { message: string; forceVisible?: boolean } | undefined>
   /** The field's path/key */
   readonly key: string
 }
@@ -100,9 +100,9 @@ export interface PublicArrayFieldAtoms<S> {
   /** Move an item from one index to another */
   readonly move: Atom.Writable<void, { from: number; to: number }>
   /** Manually trigger validation and get the result. Returns None if form not initialized. */
-  readonly validate: Atom.AtomResultFn<void, Option.Option<ValidationResult>, never>
+  readonly validate: Atom.AtomResultFn<{ forceVisible?: boolean } | void, Option.Option<ValidationResult>, never>
   /** Programmatically set or clear the field error */
-  readonly setError: Atom.Writable<void, string | undefined>
+  readonly setError: Atom.Writable<void, string | { message: string; forceVisible?: boolean } | undefined>
 }
 
 export interface FormAtomsConfig<TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = void> {
@@ -600,6 +600,11 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
       const error = get(errorAtom)
       if (Option.isNone(error)) return Option.none<string>()
 
+      // Force visible bypasses mode checks
+      if (error.value.forceVisible) {
+        return Option.some(error.value.message)
+      }
+
       const touched = get(touchedAtom)
       const submitCount = get(submitCountAtom)
       const dirtyFields = get(dirtyFieldsAtom)
@@ -996,8 +1001,9 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
 
     // Manual validation - bypasses debounce, validates immediately
     const fieldSchema = getFieldSchema(field.key)
-    const validateAtom = runtime.fn<void>()((_: void, get) =>
+    const validateAtom = runtime.fn<{ forceVisible?: boolean } | void>()((options, get) =>
       Effect.gen(function*() {
+        const forceVisible = options?.forceVisible
         const valueOption = get(valueAtom)
         if (Option.isNone(valueOption)) {
           return Option.none<ValidationResult>()
@@ -1032,7 +1038,7 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
               if (Option.isSome(errorMessage)) {
                 const currentErrors = get(errorsAtom)
                 const newErrors = new Map(currentErrors)
-                newErrors.set(field.key, { message: errorMessage.value, source: "field" as const })
+                newErrors.set(field.key, { message: errorMessage.value, source: "field" as const, forceVisible })
                 get.set(errorsAtom, newErrors)
               }
               return Option.some({
@@ -1043,17 +1049,23 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
         )
         return result
       })
-    ).pipe(Atom.setIdleTTL(0)) as Atom.AtomResultFn<void, Option.Option<ValidationResult>, never>
+    ).pipe(Atom.setIdleTTL(0)) as Atom.AtomResultFn<
+      { forceVisible?: boolean } | void,
+      Option.Option<ValidationResult>,
+      never
+    >
 
     const setErrorAtom = Atom.writable(
       () => undefined as void,
-      (ctx, message: string | undefined) => {
+      (ctx, param: string | { message: string; forceVisible?: boolean } | undefined) => {
         const currentErrors = ctx.get(errorsAtom)
         const newErrors = new Map(currentErrors)
-        if (message === undefined) {
+        if (param === undefined) {
           newErrors.delete(field.key)
         } else {
-          newErrors.set(field.key, { message, source: "field" as const })
+          const message = typeof param === "string" ? param : param.message
+          const forceVisible = typeof param === "string" ? undefined : param.forceVisible
+          newErrors.set(field.key, { message, source: "field" as const, forceVisible })
         }
         ctx.set(errorsAtom, newErrors)
       },
@@ -1172,8 +1184,9 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
 
     // Manual validation - bypasses debounce, validates immediately
     const arraySchema = fieldDef.arraySchema
-    const validateAtom = runtime.fn<void>()((_: void, get) =>
+    const validateAtom = runtime.fn<{ forceVisible?: boolean } | void>()((options, get) =>
       Effect.gen(function*() {
+        const forceVisible = options?.forceVisible
         const valueOption = get(valueAtom)
         if (Option.isNone(valueOption)) {
           return Option.none<ValidationResult>()
@@ -1203,7 +1216,7 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
               if (Option.isSome(errorMessage)) {
                 const currentErrors = get(errorsAtom)
                 const newErrors = new Map(currentErrors)
-                newErrors.set(field.key, { message: errorMessage.value, source: "field" as const })
+                newErrors.set(field.key, { message: errorMessage.value, source: "field" as const, forceVisible })
                 get.set(errorsAtom, newErrors)
               }
               return Option.some({
@@ -1214,17 +1227,23 @@ export const make = <TFields extends Field.FieldsRecord, R, A, E, SubmitArgs = v
         )
         return result
       })
-    ).pipe(Atom.setIdleTTL(0)) as Atom.AtomResultFn<void, Option.Option<ValidationResult>, never>
+    ).pipe(Atom.setIdleTTL(0)) as Atom.AtomResultFn<
+      { forceVisible?: boolean } | void,
+      Option.Option<ValidationResult>,
+      never
+    >
 
     const setErrorAtom = Atom.writable(
       () => undefined as void,
-      (ctx, message: string | undefined) => {
+      (ctx, param: string | { message: string; forceVisible?: boolean } | undefined) => {
         const currentErrors = ctx.get(errorsAtom)
         const newErrors = new Map(currentErrors)
-        if (message === undefined) {
+        if (param === undefined) {
           newErrors.delete(field.key)
         } else {
-          newErrors.set(field.key, { message, source: "field" as const })
+          const message = typeof param === "string" ? param : param.message
+          const forceVisible = typeof param === "string" ? undefined : param.forceVisible
+          newErrors.set(field.key, { message, source: "field" as const, forceVisible })
         }
         ctx.set(errorsAtom, newErrors)
       },
